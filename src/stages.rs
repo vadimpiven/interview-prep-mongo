@@ -33,6 +33,7 @@ pub trait Stage {
 }
 
 /// Collect all output from a stage into a Vec, then close it.
+/// O(N) where N = total rows produced by the stage.
 pub fn collect_all(stage: &mut dyn Stage) -> Vec<i64> {
     let mut results = Vec::new();
     loop {
@@ -53,6 +54,7 @@ pub fn collect_all(stage: &mut dyn Stage) -> Vec<i64> {
 // ---------------------------------------------------------------------------
 
 /// Produces rows from a Vec. Equivalent to SBE's VirtualScanStage.
+/// open O(1), get_next O(1), close O(1). Space O(n) for stored data.
 pub struct VecScan {
     data: Vec<i64>,
     cursor: usize,
@@ -88,6 +90,7 @@ impl Stage for VecScan {
 
 /// Pulls from child, returns only rows where predicate returns true.
 /// Streaming: no buffering, O(1) memory overhead.
+/// open O(1), get_next O(k) where k = rows skipped before next match, close O(1).
 pub struct FilterStage {
     child: Box<dyn Stage>,
     predicate: Box<dyn Fn(i64) -> bool>,
@@ -137,6 +140,7 @@ impl Stage for FilterStage {
 
 /// Blocking in open() for skip phase, streaming for limit phase.
 /// Real SBE: src/mongo/db/exec/sbe/stages/limit_skip.cpp
+/// open O(skip), get_next O(1), close O(1).
 pub struct LimitSkipStage {
     child: Box<dyn Stage>,
     skip: usize,
@@ -201,6 +205,10 @@ impl Stage for LimitSkipStage {
 /// Encoding: we pack (key, value) into a single i64 as key=row/1000, val=row%1000.
 /// Output: key * 1000 + sum (so consumers can identify which group each sum belongs to).
 /// In real SBE, key and value are separate slots.
+///
+/// open O(N) blocking — consumes all N input rows into hash table.
+/// get_next O(1) — iterates over materialized groups.
+/// close O(G) — clears G groups. Space O(G) where G = number of distinct groups.
 pub struct HashAggStage {
     child: Box<dyn Stage>,
     key_fn: fn(i64) -> i64,
@@ -270,6 +278,10 @@ impl Stage for HashAggStage {
 ///
 /// Encoding: join key = row / 1000, payload = row % 1000.
 /// Output: outer_payload * 1000 + inner_payload (to verify both sides matched).
+///
+/// open O(I) — builds hash table from I inner rows.
+/// get_next O(1) amortized — probes hash table per outer row.
+/// close O(I) — clears build table. Space O(I) for the build side.
 pub struct HashJoinStage {
     outer: Box<dyn Stage>,
     inner: Box<dyn Stage>,

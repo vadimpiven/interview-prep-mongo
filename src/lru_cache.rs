@@ -25,6 +25,7 @@ pub struct LRUCache<K, V> {
 }
 
 impl<K: Eq, V> LRUCache<K, V> {
+    /// O(1).
     pub fn new(capacity: usize) -> Self {
         assert!(capacity > 0, "LRU cache capacity must be at least 1");
         Self {
@@ -43,6 +44,7 @@ impl<K: Eq, V> LRUCache<K, V> {
     }
 
     /// Insert or overwrite. Evicts LRU if over capacity.
+    /// O(n) due to linear scan for duplicate key + VecDeque::remove.
     pub fn insert(&mut self, key: K, value: V) {
         if let Some(idx) = self.entries.iter().position(|(k, _)| *k == key) {
             self.entries.remove(idx);
@@ -53,16 +55,19 @@ impl<K: Eq, V> LRUCache<K, V> {
         }
     }
 
+    /// O(n) linear scan.
     #[must_use]
     pub fn contains(&self, key: &K) -> bool {
         self.entries.iter().any(|(k, _)| k == key)
     }
 
+    /// O(1).
     #[must_use]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
+    /// O(1).
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()

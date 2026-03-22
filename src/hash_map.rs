@@ -34,16 +34,19 @@ struct Slot<K, V> {
 }
 
 impl<K: Hash + Eq, V> HashMap<K, V> {
+    /// O(c) where c = initial capacity (default 16).
     pub fn new() -> Self {
         Self::with_capacity(16)
     }
 
+    /// O(c) where c = capacity rounded up to next power of two.
     pub fn with_capacity(capacity: usize) -> Self {
         Self::with_capacity_and_hasher(capacity, RandomState::new())
     }
 }
 
 impl<K: Hash + Eq, V, S: BuildHasher> HashMap<K, V, S> {
+    /// O(c) where c = capacity rounded up to next power of two.
     pub fn with_capacity_and_hasher(capacity: usize, hash_builder: S) -> Self {
         let capacity = capacity.max(1).next_power_of_two();
         Self {
@@ -55,6 +58,7 @@ impl<K: Hash + Eq, V, S: BuildHasher> HashMap<K, V, S> {
     }
 
     /// Insert or overwrite. Rehashes if load factor exceeds 75%.
+    /// O(1) amortized, O(n) worst case (due to probing or rehash).
     pub fn insert(&mut self, key: K, value: V) {
         if (self.len + self.tombstone_count) * 4 >= self.capacity() * 3 {
             self.rehash(self.capacity() * 2);
@@ -84,6 +88,7 @@ impl<K: Hash + Eq, V, S: BuildHasher> HashMap<K, V, S> {
     }
 
     /// Returns reference to value, or None if not found.
+    /// O(1) amortized, O(n) worst case (due to probing).
     #[must_use]
     pub fn get(&self, key: &K) -> Option<&V> {
         let idx = self.probe_lookup(key);
@@ -94,6 +99,7 @@ impl<K: Hash + Eq, V, S: BuildHasher> HashMap<K, V, S> {
     }
 
     /// Tombstone deletion. Returns true if key existed.
+    /// O(1) amortized, O(n) worst case (due to probing).
     pub fn remove(&mut self, key: &K) -> bool {
         let idx = self.probe_lookup(key);
         match &mut self.slots[idx] {
@@ -107,17 +113,20 @@ impl<K: Hash + Eq, V, S: BuildHasher> HashMap<K, V, S> {
         }
     }
 
+    /// O(1).
     #[must_use]
     pub fn len(&self) -> usize {
         self.len
     }
 
+    /// O(1).
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len == 0
     }
 
     /// Return an iterator over live (key, value) pairs.
+    /// O(n) to fully iterate (scans all slots including empty/tombstone).
     pub fn iter(&self) -> impl Iterator<Item = (&K, &V)> {
         self.slots.iter().filter_map(|slot| match slot {
             Some(s) if !s.deleted => Some((&s.key, &s.value)),

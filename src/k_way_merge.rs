@@ -20,6 +20,7 @@ use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
 /// Merges K sorted iterators into a single sorted iterator.
+/// Each next() call is O(log K). Full iteration over N total elements is O(N log K).
 pub struct MergeIterator<I, T> {
     heap: BinaryHeap<MergeSource<I, T>>,
 }
@@ -55,6 +56,7 @@ impl<I: Iterator<Item = T>, T: Ord> PartialEq for MergeSource<I, T> {
 impl<I: Iterator<Item = T>, T: Ord> Eq for MergeSource<I, T> {}
 
 impl<I: Iterator<Item = T>, T: Ord> MergeIterator<I, T> {
+    /// Initialize merge from K iterators. O(K log K) to build the heap.
     pub fn new(iters: Vec<I>) -> Self {
         let mut heap = BinaryHeap::new();
         for (id, mut iter) in iters.into_iter().enumerate() {
@@ -74,6 +76,7 @@ impl<I: Iterator<Item = T>, T: Ord> MergeIterator<I, T> {
 impl<I: Iterator<Item = T>, T: Ord> Iterator for MergeIterator<I, T> {
     type Item = T;
 
+    /// O(log K) per call — one heap pop + one heap push.
     fn next(&mut self) -> Option<T> {
         let mut stream = self.heap.pop()?;
         let result = if let Some(next_val) = stream.iter.next() {

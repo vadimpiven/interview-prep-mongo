@@ -40,6 +40,7 @@ const SALT: [u32; 8] = [
 impl BloomFilter {
     /// Create with target false positive rate for expected number of elements.
     /// Formula: bits = -8n / ln(1 - fpRate^(1/8)) where 8 = number of hash functions.
+    /// O(n / fpRate) to allocate blocks.
     pub fn new(expected_elements: usize, false_positive_rate: f64) -> Self {
         assert!(expected_elements > 0, "expected_elements must be > 0");
         assert!(
@@ -58,6 +59,7 @@ impl BloomFilter {
     }
 
     /// Insert a pre-hashed value. Call with hash(key), not key directly.
+    /// O(1) — 8 bit-set operations within a single cache line.
     pub fn insert(&mut self, hash: u64) {
         let block_idx = (hash >> 32) as usize & (self.num_blocks() - 1);
         let h = hash as u32;
@@ -69,6 +71,7 @@ impl BloomFilter {
     }
 
     /// Check if a value was possibly inserted. No false negatives.
+    /// O(1) — 8 bit-check operations within a single cache line.
     #[must_use]
     pub fn maybe_contains(&self, hash: u64) -> bool {
         let block_idx = (hash >> 32) as usize & (self.num_blocks() - 1);
@@ -83,6 +86,7 @@ impl BloomFilter {
 
 /// Helper: hash any hashable value to u64 for use with BloomFilter.
 /// Callers must use the same BuildHasher instance for both insert and lookup.
+/// O(size of val) — one hash computation.
 pub fn compute_hash<T: Hash>(val: &T, hash_builder: &impl BuildHasher) -> u64 {
     let mut h = hash_builder.build_hasher();
     val.hash(&mut h);

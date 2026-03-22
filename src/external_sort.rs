@@ -40,6 +40,7 @@ pub struct SortStats {
 }
 
 impl<T: Ord> ExternalSorter<T> {
+    /// O(1).
     pub fn new(max_memory_items: usize) -> Self {
         assert!(max_memory_items > 0, "buffer capacity must be at least 1");
         Self {
@@ -52,6 +53,8 @@ impl<T: Ord> ExternalSorter<T> {
     ///
     /// Phase 1: accumulate into buffer, sort and "spill" when buffer full.
     /// Phase 2: K-way merge all sorted runs via MergeIterator.
+    ///
+    /// O(N log N) time, O(N) space. With K runs: merge phase is O(N log K).
     pub fn sort(&self, input: impl IntoIterator<Item = T>) -> (Vec<T>, SortStats) {
         let mut runs: Vec<Vec<T>> = Vec::new();
         let mut buffer: Vec<T> = Vec::new();

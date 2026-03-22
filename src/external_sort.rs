@@ -16,30 +16,32 @@
 //   With spilling: O(N log N) time, O(M) space where M = memory limit
 //   K-way merge: O(N log K) where K = number of runs
 //
-// In real MongoDB: runs are serialized to temp files with snappy compression.
-// Here we simulate with Vec<Vec<T>> for testability.
+// Note: this simulates disk spilling for algorithmic correctness but does not
+// actually reduce peak memory — all runs remain in memory as Vec<Vec<T>>.
+// In real MongoDB, runs are serialized to temp files with snappy compression.
 
-use std::cmp::Ordering;
-use std::collections::{BinaryHeap, VecDeque};
+use crate::k_way_merge::MergeIterator;
+use std::collections::BinaryHeap;
 use std::marker::PhantomData;
 
 /// External sorter that spills to "disk" (simulated as Vec<Vec<T>>)
 /// when in-memory buffer exceeds max_memory_items.
-pub struct ExternalSorter<T: Ord + Clone> {
+pub struct ExternalSorter<T> {
     max_memory_items: usize,
     _phantom: PhantomData<T>,
 }
 
 /// Statistics returned after sorting, for discussion in interview.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct SortStats {
     pub total_items: usize,
     pub num_runs: usize, // 1 = entirely in-memory, >1 = spilled
     pub spilled: bool,
 }
 
-impl<T: Ord + Clone> ExternalSorter<T> {
+impl<T: Ord> ExternalSorter<T> {
     pub fn new(max_memory_items: usize) -> Self {
+        assert!(max_memory_items > 0, "buffer capacity must be at least 1");
         Self {
             max_memory_items,
             _phantom: PhantomData,
@@ -49,7 +51,7 @@ impl<T: Ord + Clone> ExternalSorter<T> {
     /// Sort the input. Returns sorted Vec + stats.
     ///
     /// Phase 1: accumulate into buffer, sort and "spill" when buffer full.
-    /// Phase 2: K-way merge all sorted runs.
+    /// Phase 2: K-way merge all sorted runs via MergeIterator.
     pub fn sort(&self, input: impl IntoIterator<Item = T>) -> (Vec<T>, SortStats) {
         let mut runs: Vec<Vec<T>> = Vec::new();
         let mut buffer: Vec<T> = Vec::new();
@@ -86,8 +88,9 @@ impl<T: Ord + Clone> ExternalSorter<T> {
             );
         }
 
-        // Phase 2: K-way merge
-        let result = self.k_way_merge(runs);
+        // Phase 2: K-way merge using the shared MergeIterator
+        let iters: Vec<_> = runs.into_iter().map(|r| r.into_iter()).collect();
+        let result = MergeIterator::new(iters).collect();
 
         (
             result,
@@ -98,75 +101,7 @@ impl<T: Ord + Clone> ExternalSorter<T> {
             },
         )
     }
-
-    /// Merge K sorted runs using a min-heap.
-    /// Same algorithm as MergeIterator in sorter_template_defs.h.
-    fn k_way_merge(&self, runs: Vec<Vec<T>>) -> Vec<T> {
-        if runs.len() == 1 {
-            return runs.into_iter().next().unwrap();
-        }
-
-        let mut heap: BinaryHeap<RunEntry<T>> = BinaryHeap::new();
-
-        // Initialize heap with first element from each run
-        for (run_id, run) in runs.into_iter().enumerate() {
-            let mut remaining: VecDeque<T> = run.into();
-            if let Some(val) = remaining.pop_front() {
-                heap.push(RunEntry {
-                    value: val,
-                    run_id,
-                    remaining,
-                });
-            }
-        }
-
-        let mut result = Vec::new();
-
-        while let Some(mut entry) = heap.pop() {
-            let val = if let Some(next_val) = entry.remaining.pop_front() {
-                let output = std::mem::replace(&mut entry.value, next_val);
-                heap.push(entry);
-                output
-            } else {
-                entry.value // last element from this run
-            };
-            result.push(val);
-        }
-
-        result
-    }
 }
-
-/// Heap entry: wraps a value with its source run for the K-way merge.
-/// Ord is reversed for min-heap (BinaryHeap is max-heap).
-struct RunEntry<T: Ord> {
-    value: T,
-    run_id: usize,
-    remaining: VecDeque<T>,
-}
-
-impl<T: Ord> Ord for RunEntry<T> {
-    fn cmp(&self, other: &Self) -> Ordering {
-        other
-            .value
-            .cmp(&self.value) // reversed for min-heap
-            .then(other.run_id.cmp(&self.run_id)) // stable
-    }
-}
-
-impl<T: Ord> PartialOrd for RunEntry<T> {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl<T: Ord> PartialEq for RunEntry<T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.value == other.value && self.run_id == other.run_id
-    }
-}
-
-impl<T: Ord> Eq for RunEntry<T> {}
 
 // ---------------------------------------------------------------------------
 // TopK — Bounded heap for ORDER BY + LIMIT K
@@ -310,9 +245,8 @@ mod tests {
 
     #[test]
     fn sort_exact_buffer_boundary() {
-        // Input size is exact multiple of max_memory_items
         let sorter = ExternalSorter::new(3);
-        let (result, stats) = sorter.sort(vec![6, 5, 4, 3, 2, 1]); // 6 items, buffer=3
+        let (result, stats) = sorter.sort(vec![6, 5, 4, 3, 2, 1]);
         assert_eq!(result, vec![1, 2, 3, 4, 5, 6]);
         assert_eq!(stats.num_runs, 2);
         assert!(stats.spilled);
@@ -320,7 +254,6 @@ mod tests {
 
     #[test]
     fn sort_buffer_size_one() {
-        // Degenerate: every element is its own run
         let sorter = ExternalSorter::new(1);
         let (result, stats) = sorter.sort(vec![3, 1, 2]);
         assert_eq!(result, vec![1, 2, 3]);
@@ -347,7 +280,13 @@ mod tests {
         let sorter = ExternalSorter::new(5);
         let (_, stats) = sorter.sort(vec![10, 20, 30, 40, 50, 60, 70]);
         assert_eq!(stats.total_items, 7);
-        assert_eq!(stats.num_runs, 2); // 5 + 2
+        assert_eq!(stats.num_runs, 2);
+    }
+
+    #[test]
+    #[should_panic(expected = "buffer capacity must be at least 1")]
+    fn sort_zero_buffer_panics() {
+        let _sorter = ExternalSorter::<i32>::new(0);
     }
 
     // -- TopK edge cases --

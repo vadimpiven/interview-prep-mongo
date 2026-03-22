@@ -32,15 +32,19 @@ pub trait Stage {
     fn close(&mut self);
 }
 
-/// Collect all output from a stage into a Vec. Useful in tests.
+/// Collect all output from a stage into a Vec, then close it.
 pub fn collect_all(stage: &mut dyn Stage) -> Vec<i64> {
     let mut results = Vec::new();
     loop {
         match stage.get_next() {
             (PlanState::Advanced, Some(val)) => results.push(val),
-            _ => break,
+            (PlanState::Advanced, None) => {
+                unreachable!("stage returned Advanced without a value")
+            }
+            (PlanState::Eof, _) => break,
         }
     }
+    stage.close();
     results
 }
 
@@ -51,24 +55,24 @@ pub fn collect_all(stage: &mut dyn Stage) -> Vec<i64> {
 /// Produces rows from a Vec. Equivalent to SBE's VirtualScanStage.
 pub struct VecScan {
     data: Vec<i64>,
-    idx: usize,
+    cursor: usize,
 }
 
 impl VecScan {
     pub fn new(data: Vec<i64>) -> Self {
-        Self { data, idx: 0 }
+        Self { data, cursor: 0 }
     }
 }
 
 impl Stage for VecScan {
     fn open(&mut self, _re_open: bool) {
-        self.idx = 0;
+        self.cursor = 0;
     }
 
     fn get_next(&mut self) -> (PlanState, Option<i64>) {
-        if self.idx < self.data.len() {
-            let val = self.data[self.idx];
-            self.idx += 1;
+        if self.cursor < self.data.len() {
+            let val = self.data[self.cursor];
+            self.cursor += 1;
             (PlanState::Advanced, Some(val))
         } else {
             (PlanState::Eof, None)
@@ -137,7 +141,7 @@ pub struct LimitSkipStage {
     child: Box<dyn Stage>,
     skip: usize,
     limit: usize,
-    current: usize,
+    emitted: usize,
     is_eof: bool,
 }
 
@@ -147,7 +151,7 @@ impl LimitSkipStage {
             child,
             skip,
             limit,
-            current: 0,
+            emitted: 0,
             is_eof: false,
         }
     }
@@ -156,7 +160,7 @@ impl LimitSkipStage {
 impl Stage for LimitSkipStage {
     fn open(&mut self, re_open: bool) {
         self.child.open(re_open);
-        self.current = 0;
+        self.emitted = 0;
         self.is_eof = false;
         // Drain skip rows from child
         for _ in 0..self.skip {
@@ -168,11 +172,14 @@ impl Stage for LimitSkipStage {
     }
 
     fn get_next(&mut self) -> (PlanState, Option<i64>) {
-        if self.is_eof || self.current >= self.limit {
+        if self.is_eof || self.emitted >= self.limit {
             return (PlanState::Eof, None);
         }
-        self.current += 1;
-        self.child.get_next()
+        let result = self.child.get_next();
+        if matches!(result, (PlanState::Advanced, _)) {
+            self.emitted += 1;
+        }
+        result
     }
 
     fn close(&mut self) {
@@ -192,13 +199,14 @@ impl Stage for LimitSkipStage {
 /// collation-aware grouping, memory tracking.
 ///
 /// Encoding: we pack (key, value) into a single i64 as key=row/1000, val=row%1000.
+/// Output: key * 1000 + sum (so consumers can identify which group each sum belongs to).
 /// In real SBE, key and value are separate slots.
 pub struct HashAggStage {
     child: Box<dyn Stage>,
     key_fn: fn(i64) -> i64,
     val_fn: fn(i64) -> i64,
     groups: Vec<(i64, i64)>, // (key, sum)
-    idx: usize,
+    cursor: usize,
 }
 
 impl HashAggStage {
@@ -208,7 +216,7 @@ impl HashAggStage {
             key_fn,
             val_fn,
             groups: Vec::new(),
-            idx: 0,
+            cursor: 0,
         }
     }
 }
@@ -229,24 +237,23 @@ impl Stage for HashAggStage {
                 _ => break,
             }
         }
-        self.child.close();
-
         // Materialize groups in sorted order for deterministic output
         self.groups = map.into_iter().collect();
         self.groups.sort_by_key(|(k, _)| *k);
-        self.idx = 0;
+        self.cursor = 0;
     }
 
     fn get_next(&mut self) -> (PlanState, Option<i64>) {
-        if self.idx >= self.groups.len() {
+        if self.cursor >= self.groups.len() {
             return (PlanState::Eof, None);
         }
-        let (_, sum) = self.groups[self.idx];
-        self.idx += 1;
-        (PlanState::Advanced, Some(sum))
+        let (key, sum) = self.groups[self.cursor];
+        self.cursor += 1;
+        (PlanState::Advanced, Some(key * 1000 + sum))
     }
 
     fn close(&mut self) {
+        self.child.close();
         self.groups.clear();
     }
 }
@@ -270,7 +277,7 @@ pub struct HashJoinStage {
     inner_key_fn: fn(i64) -> i64,
     outer_val_fn: fn(i64) -> i64,
     inner_val_fn: fn(i64) -> i64,
-    table: HashMap<i64, Vec<i64>>, // join_key → [inner_payload, ...]
+    build_table: HashMap<i64, Vec<i64>>, // join_key → [inner_payload, ...]
     // Buffered matches for current outer row
     match_buffer: Vec<i64>,
     match_idx: usize,
@@ -294,7 +301,7 @@ impl HashJoinStage {
             inner_key_fn,
             outer_val_fn,
             inner_val_fn,
-            table: HashMap::new(),
+            build_table: HashMap::new(),
             match_buffer: Vec::new(),
             match_idx: 0,
             current_outer_val: 0,
@@ -307,13 +314,13 @@ impl Stage for HashJoinStage {
     fn open(&mut self, re_open: bool) {
         // Build phase: materialize inner side into hash table
         self.inner.open(re_open);
-        self.table.clear();
+        self.build_table.clear();
         loop {
             match self.inner.get_next() {
                 (PlanState::Advanced, Some(row)) => {
                     let key = (self.inner_key_fn)(row);
                     let val = (self.inner_val_fn)(row);
-                    self.table.entry(key).or_default().push(val);
+                    self.build_table.entry(key).or_default().push(val);
                 }
                 _ => break,
             }
@@ -350,17 +357,17 @@ impl Stage for HashJoinStage {
                 (PlanState::Advanced, Some(row)) => {
                     let key = (self.outer_key_fn)(row);
                     self.current_outer_val = (self.outer_val_fn)(row);
-                    self.match_buffer = self.table.get(&key).cloned().unwrap_or_default();
+                    self.match_buffer = self.build_table.get(&key).cloned().unwrap_or_default();
                     self.match_idx = 0;
                 }
-                _ => {}
+                _ => unreachable!("outer stage returned Advanced without a value"),
             }
         }
     }
 
     fn close(&mut self) {
         self.outer.close();
-        self.table.clear();
+        self.build_table.clear();
     }
 }
 
@@ -444,12 +451,12 @@ mod tests {
     fn hash_agg_group_by_sum() {
         // Encoding: key = row / 10, value = row % 10
         // Rows: (key=1,val=5), (key=1,val=3), (key=2,val=7), (key=2,val=1)
+        // Output: key*1000+sum → 1008, 2008
         let scan = Box::new(VecScan::new(vec![15, 13, 27, 21]));
         let mut agg = HashAggStage::new(scan, |r| r / 10, |r| r % 10);
         agg.open(false);
         let results = collect_all(&mut agg);
-        // key=1: 5+3=8, key=2: 7+1=8
-        assert_eq!(results, vec![8, 8]);
+        assert_eq!(results, vec![1008, 2008]);
     }
 
     #[test]
@@ -462,10 +469,11 @@ mod tests {
 
     #[test]
     fn hash_agg_single_group() {
+        // key=1, vals=1+2+3=6 → output 1*1000+6=1006
         let scan = Box::new(VecScan::new(vec![11, 12, 13]));
         let mut agg = HashAggStage::new(scan, |r| r / 10, |r| r % 10);
         agg.open(false);
-        assert_eq!(collect_all(&mut agg), vec![6]); // 1+2+3
+        assert_eq!(collect_all(&mut agg), vec![1006]);
     }
 
     // -- HashJoin tests --
@@ -658,30 +666,32 @@ mod tests {
 
     #[test]
     fn hash_agg_single_row() {
+        // key=1, val=5 → output 1*1000+5=1005
         let scan = Box::new(VecScan::new(vec![15]));
         let mut agg = HashAggStage::new(scan, |r| r / 10, |r| r % 10);
         agg.open(false);
-        assert_eq!(collect_all(&mut agg), vec![5]);
+        assert_eq!(collect_all(&mut agg), vec![1005]);
     }
 
     #[test]
     fn hash_agg_many_groups_one_row_each() {
-        // 5 distinct groups, each with one row
+        // 5 distinct groups, each with val=1 → key*1000+1
         let scan = Box::new(VecScan::new(vec![11, 21, 31, 41, 51]));
         let mut agg = HashAggStage::new(scan, |r| r / 10, |r| r % 10);
         agg.open(false);
         let results = collect_all(&mut agg);
-        assert_eq!(results, vec![1, 1, 1, 1, 1]);
+        assert_eq!(results, vec![1001, 2001, 3001, 4001, 5001]);
     }
 
     #[test]
     fn hash_agg_reopen() {
+        // key=1, vals=1+2=3 → output 1003
         let scan = Box::new(VecScan::new(vec![11, 12]));
         let mut agg = HashAggStage::new(scan, |r| r / 10, |r| r % 10);
         agg.open(false);
-        assert_eq!(collect_all(&mut agg), vec![3]); // 1+2
+        assert_eq!(collect_all(&mut agg), vec![1003]);
         agg.open(true);
-        assert_eq!(collect_all(&mut agg), vec![3]); // same result
+        assert_eq!(collect_all(&mut agg), vec![1003]);
     }
 
     // -- Additional HashJoin tests --
@@ -781,10 +791,11 @@ mod tests {
     fn filter_then_agg() {
         // Scan [11,12,21,22,31] → Filter(key < 3) → Agg(group by key, sum val)
         // After filter: 11,12,21,22 → groups: key=1→3, key=2→3
+        // Output: 1003, 2003
         let scan = Box::new(VecScan::new(vec![11, 12, 21, 22, 31]));
         let filter = Box::new(FilterStage::new(scan, |r| r / 10 < 3));
         let mut agg = HashAggStage::new(filter, |r| r / 10, |r| r % 10);
         agg.open(false);
-        assert_eq!(collect_all(&mut agg), vec![3, 3]);
+        assert_eq!(collect_all(&mut agg), vec![1003, 2003]);
     }
 }

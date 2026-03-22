@@ -16,7 +16,7 @@ pub mod hash_map;
 /// Also relevant to change stream event merging across shards.
 pub mod k_way_merge;
 
-/// LRU cache: HashMap + VecDeque for O(1) amortized get/put.
+/// LRU cache: VecDeque with linear scan for O(n) get/insert.
 /// MongoDB's plan cache (lru_key_value.h) uses this exact pattern.
 pub mod lru_cache;
 

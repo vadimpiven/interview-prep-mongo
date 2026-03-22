@@ -20,18 +20,18 @@ use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
 /// Merges K sorted iterators into a single sorted iterator.
-pub struct MergeIterator<I: Iterator<Item = T>, T: Ord> {
-    heap: BinaryHeap<Stream<I, T>>,
+pub struct MergeIterator<I, T> {
+    heap: BinaryHeap<MergeSource<I, T>>,
 }
 
-struct Stream<I: Iterator<Item = T>, T: Ord> {
+struct MergeSource<I, T> {
     current: T,
     source_id: usize,
     iter: I,
 }
 
 // BinaryHeap is a max-heap. Reverse ordering to get min-heap behavior.
-impl<I: Iterator<Item = T>, T: Ord> Ord for Stream<I, T> {
+impl<I: Iterator<Item = T>, T: Ord> Ord for MergeSource<I, T> {
     fn cmp(&self, other: &Self) -> Ordering {
         other
             .current
@@ -40,26 +40,26 @@ impl<I: Iterator<Item = T>, T: Ord> Ord for Stream<I, T> {
     }
 }
 
-impl<I: Iterator<Item = T>, T: Ord> PartialOrd for Stream<I, T> {
+impl<I: Iterator<Item = T>, T: Ord> PartialOrd for MergeSource<I, T> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<I: Iterator<Item = T>, T: Ord> PartialEq for Stream<I, T> {
+impl<I: Iterator<Item = T>, T: Ord> PartialEq for MergeSource<I, T> {
     fn eq(&self, other: &Self) -> bool {
         self.current == other.current && self.source_id == other.source_id
     }
 }
 
-impl<I: Iterator<Item = T>, T: Ord> Eq for Stream<I, T> {}
+impl<I: Iterator<Item = T>, T: Ord> Eq for MergeSource<I, T> {}
 
 impl<I: Iterator<Item = T>, T: Ord> MergeIterator<I, T> {
     pub fn new(iters: Vec<I>) -> Self {
         let mut heap = BinaryHeap::new();
         for (id, mut iter) in iters.into_iter().enumerate() {
             if let Some(val) = iter.next() {
-                heap.push(Stream {
+                heap.push(MergeSource {
                     current: val,
                     source_id: id,
                     iter,
@@ -77,10 +77,10 @@ impl<I: Iterator<Item = T>, T: Ord> Iterator for MergeIterator<I, T> {
     fn next(&mut self) -> Option<T> {
         let mut stream = self.heap.pop()?;
         let result = if let Some(next_val) = stream.iter.next() {
-            // Stream has more — swap current value and re-push
+            // MergeSource has more — swap current value and re-push
             std::mem::replace(&mut stream.current, next_val)
         } else {
-            // Stream exhausted — return current, don't re-push
+            // MergeSource exhausted — return current, don't re-push
             return Some(stream.current);
         };
         self.heap.push(stream);

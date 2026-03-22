@@ -17,15 +17,16 @@
 //
 // Complexity: insert O(1), maybe_contains O(1), space O(n / ln(2)^2 * 1/fpRate)
 
-use std::hash::{Hash, Hasher};
+use std::hash::{BuildHasher, Hash, Hasher};
 
+#[derive(Debug)]
 pub struct BloomFilter {
     blocks: Vec<Block>,
-    num_blocks: usize,
 }
 
 /// 32-byte block aligned to cache line. 8 words × 4 bytes = 32 bytes.
 #[repr(align(32))]
+#[derive(Debug)]
 struct Block {
     words: [u32; 8],
 }
@@ -39,17 +40,26 @@ const SALT: [u32; 8] = [
 impl BloomFilter {
     /// Create with target false positive rate for expected number of elements.
     /// Formula: bits = -8n / ln(1 - fpRate^(1/8)) where 8 = number of hash functions.
-    pub fn new(expected_elements: usize, fp_rate: f64) -> Self {
-        let num_bits =
-            (-8.0 * expected_elements as f64 / (1.0 - fp_rate.powf(1.0 / 8.0)).ln()) as usize;
+    pub fn new(expected_elements: usize, false_positive_rate: f64) -> Self {
+        assert!(expected_elements > 0, "expected_elements must be > 0");
+        assert!(
+            false_positive_rate > 0.0 && false_positive_rate < 1.0,
+            "false_positive_rate must be in (0, 1)"
+        );
+        let num_bits = (-8.0 * expected_elements as f64
+            / (1.0 - false_positive_rate.powf(1.0 / 8.0)).ln()) as usize;
         let num_blocks = ((num_bits + 255) / 256).next_power_of_two().max(1);
         let blocks = (0..num_blocks).map(|_| Block { words: [0; 8] }).collect();
-        Self { blocks, num_blocks }
+        Self { blocks }
+    }
+
+    fn num_blocks(&self) -> usize {
+        self.blocks.len()
     }
 
     /// Insert a pre-hashed value. Call with hash(key), not key directly.
     pub fn insert(&mut self, hash: u64) {
-        let block_idx = (hash >> 32) as usize & (self.num_blocks - 1);
+        let block_idx = (hash >> 32) as usize & (self.num_blocks() - 1);
         let h = hash as u32;
         for i in 0..8 {
             // Top 5 bits of (h * SALT[i]) → bit position 0..31
@@ -59,8 +69,9 @@ impl BloomFilter {
     }
 
     /// Check if a value was possibly inserted. No false negatives.
+    #[must_use]
     pub fn maybe_contains(&self, hash: u64) -> bool {
-        let block_idx = (hash >> 32) as usize & (self.num_blocks - 1);
+        let block_idx = (hash >> 32) as usize & (self.num_blocks() - 1);
         let h = hash as u32;
         let block = &self.blocks[block_idx];
         SALT.iter().enumerate().all(|(i, &salt)| {
@@ -71,8 +82,9 @@ impl BloomFilter {
 }
 
 /// Helper: hash any hashable value to u64 for use with BloomFilter.
-pub fn hash_value<T: Hash>(val: &T) -> u64 {
-    let mut h = std::collections::hash_map::DefaultHasher::new();
+/// Callers must use the same BuildHasher instance for both insert and lookup.
+pub fn compute_hash<T: Hash>(val: &T, hash_builder: &impl BuildHasher) -> u64 {
+    let mut h = hash_builder.build_hasher();
     val.hash(&mut h);
     h.finish()
 }
@@ -80,17 +92,19 @@ pub fn hash_value<T: Hash>(val: &T) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::hash_map::RandomState;
 
     #[test]
     fn inserted_elements_found() {
+        let s = RandomState::new();
         let mut bf = BloomFilter::new(100, 0.01);
         for i in 0..100 {
-            bf.insert(hash_value(&i));
+            bf.insert(compute_hash(&i, &s));
         }
         // No false negatives allowed
         for i in 0..100 {
             assert!(
-                bf.maybe_contains(hash_value(&i)),
+                bf.maybe_contains(compute_hash(&i, &s)),
                 "False negative for {}",
                 i
             );
@@ -99,18 +113,20 @@ mod tests {
 
     #[test]
     fn empty_filter_rejects() {
+        let s = RandomState::new();
         let bf = BloomFilter::new(100, 0.01);
-        assert!(!bf.maybe_contains(hash_value(&42)));
+        assert!(!bf.maybe_contains(compute_hash(&42, &s)));
     }
 
     #[test]
     fn false_positive_rate_bounded() {
+        let s = RandomState::new();
         let mut bf = BloomFilter::new(1000, 0.01);
         for i in 0..1000 {
-            bf.insert(hash_value(&i));
+            bf.insert(compute_hash(&i, &s));
         }
         let fps: usize = (1000..11000)
-            .filter(|i| bf.maybe_contains(hash_value(i)))
+            .filter(|i| bf.maybe_contains(compute_hash(i, &s)))
             .count();
         // With 1% target FP rate, expect <200 out of 10000 (2% margin for randomness)
         assert!(fps < 200, "FP rate too high: {}/10000", fps);
@@ -118,44 +134,49 @@ mod tests {
 
     #[test]
     fn single_element() {
+        let s = RandomState::new();
         let mut bf = BloomFilter::new(10, 0.01);
-        bf.insert(hash_value(&42));
-        assert!(bf.maybe_contains(hash_value(&42)));
+        bf.insert(compute_hash(&42, &s));
+        assert!(bf.maybe_contains(compute_hash(&42, &s)));
     }
 
     #[test]
     fn string_keys() {
+        let s = RandomState::new();
         let mut bf = BloomFilter::new(100, 0.01);
-        bf.insert(hash_value(&"hello"));
-        bf.insert(hash_value(&"world"));
-        assert!(bf.maybe_contains(hash_value(&"hello")));
-        assert!(bf.maybe_contains(hash_value(&"world")));
+        bf.insert(compute_hash(&"hello", &s));
+        bf.insert(compute_hash(&"world", &s));
+        assert!(bf.maybe_contains(compute_hash(&"hello", &s)));
+        assert!(bf.maybe_contains(compute_hash(&"world", &s)));
     }
 
     #[test]
     fn insert_same_element_twice_is_idempotent() {
+        let s = RandomState::new();
         let mut bf = BloomFilter::new(10, 0.01);
-        bf.insert(hash_value(&42));
-        bf.insert(hash_value(&42));
-        assert!(bf.maybe_contains(hash_value(&42)));
+        bf.insert(compute_hash(&42, &s));
+        bf.insert(compute_hash(&42, &s));
+        assert!(bf.maybe_contains(compute_hash(&42, &s)));
     }
 
     #[test]
     fn minimal_filter_one_element() {
+        let s = RandomState::new();
         let mut bf = BloomFilter::new(1, 0.5);
-        bf.insert(hash_value(&1));
-        assert!(bf.maybe_contains(hash_value(&1)));
+        bf.insert(compute_hash(&1, &s));
+        assert!(bf.maybe_contains(compute_hash(&1, &s)));
     }
 
     #[test]
     fn many_elements_no_false_negatives() {
+        let s = RandomState::new();
         let mut bf = BloomFilter::new(10000, 0.001);
         for i in 0..10000 {
-            bf.insert(hash_value(&i));
+            bf.insert(compute_hash(&i, &s));
         }
         for i in 0..10000 {
             assert!(
-                bf.maybe_contains(hash_value(&i)),
+                bf.maybe_contains(compute_hash(&i, &s)),
                 "False negative for {}",
                 i
             );
@@ -164,9 +185,10 @@ mod tests {
 
     #[test]
     fn empty_filter_rejects_many() {
+        let s = RandomState::new();
         let bf = BloomFilter::new(100, 0.01);
         for i in 0..100 {
-            assert!(!bf.maybe_contains(hash_value(&i)));
+            assert!(!bf.maybe_contains(compute_hash(&i, &s)));
         }
     }
 }

@@ -20,7 +20,7 @@
 // Here we simulate with Vec<Vec<T>> for testability.
 
 use std::cmp::Ordering;
-use std::collections::BinaryHeap;
+use std::collections::{BinaryHeap, VecDeque};
 use std::marker::PhantomData;
 
 /// External sorter that spills to "disk" (simulated as Vec<Vec<T>>)
@@ -110,13 +110,12 @@ impl<T: Ord + Clone> ExternalSorter<T> {
 
         // Initialize heap with first element from each run
         for (run_id, run) in runs.into_iter().enumerate() {
-            let mut iter = run.into_iter();
-            if let Some(val) = iter.next() {
+            let mut remaining: VecDeque<T> = run.into();
+            if let Some(val) = remaining.pop_front() {
                 heap.push(RunEntry {
                     value: val,
                     run_id,
-                    remaining: iter.collect(),
-                    pos: 0,
+                    remaining,
                 });
             }
         }
@@ -124,9 +123,7 @@ impl<T: Ord + Clone> ExternalSorter<T> {
         let mut result = Vec::new();
 
         while let Some(mut entry) = heap.pop() {
-            let val = if entry.pos < entry.remaining.len() {
-                let next_val = entry.remaining[entry.pos].clone();
-                entry.pos += 1;
+            let val = if let Some(next_val) = entry.remaining.pop_front() {
                 let output = std::mem::replace(&mut entry.value, next_val);
                 heap.push(entry);
                 output
@@ -145,8 +142,7 @@ impl<T: Ord + Clone> ExternalSorter<T> {
 struct RunEntry<T: Ord> {
     value: T,
     run_id: usize,
-    remaining: Vec<T>,
-    pos: usize,
+    remaining: VecDeque<T>,
 }
 
 impl<T: Ord> Ord for RunEntry<T> {
@@ -308,5 +304,81 @@ mod tests {
     fn top_k_with_duplicates() {
         let result = top_k(vec![3, 1, 2, 1, 3, 2], 4);
         assert_eq!(result, vec![1, 1, 2, 2]);
+    }
+
+    // -- External sort edge cases --
+
+    #[test]
+    fn sort_exact_buffer_boundary() {
+        // Input size is exact multiple of max_memory_items
+        let sorter = ExternalSorter::new(3);
+        let (result, stats) = sorter.sort(vec![6, 5, 4, 3, 2, 1]); // 6 items, buffer=3
+        assert_eq!(result, vec![1, 2, 3, 4, 5, 6]);
+        assert_eq!(stats.num_runs, 2);
+        assert!(stats.spilled);
+    }
+
+    #[test]
+    fn sort_buffer_size_one() {
+        // Degenerate: every element is its own run
+        let sorter = ExternalSorter::new(1);
+        let (result, stats) = sorter.sort(vec![3, 1, 2]);
+        assert_eq!(result, vec![1, 2, 3]);
+        assert_eq!(stats.num_runs, 3);
+    }
+
+    #[test]
+    fn sort_all_same_values() {
+        let sorter = ExternalSorter::new(2);
+        let (result, _) = sorter.sort(vec![5, 5, 5, 5, 5]);
+        assert_eq!(result, vec![5, 5, 5, 5, 5]);
+    }
+
+    #[test]
+    fn sort_two_elements_reversed() {
+        let sorter = ExternalSorter::new(10);
+        let (result, stats) = sorter.sort(vec![2, 1]);
+        assert_eq!(result, vec![1, 2]);
+        assert!(!stats.spilled);
+    }
+
+    #[test]
+    fn sort_stats_correct_item_count() {
+        let sorter = ExternalSorter::new(5);
+        let (_, stats) = sorter.sort(vec![10, 20, 30, 40, 50, 60, 70]);
+        assert_eq!(stats.total_items, 7);
+        assert_eq!(stats.num_runs, 2); // 5 + 2
+    }
+
+    // -- TopK edge cases --
+
+    #[test]
+    fn top_k_equals_input_length() {
+        let result = top_k(vec![5, 3, 1, 4, 2], 5);
+        assert_eq!(result, vec![1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn top_k_all_same() {
+        let result = top_k(vec![7, 7, 7, 7], 2);
+        assert_eq!(result, vec![7, 7]);
+    }
+
+    #[test]
+    fn top_k_single_element_input() {
+        let result = top_k(vec![42], 1);
+        assert_eq!(result, vec![42]);
+    }
+
+    #[test]
+    fn top_k_already_sorted() {
+        let result = top_k(vec![1, 2, 3, 4, 5], 3);
+        assert_eq!(result, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn top_k_reverse_sorted() {
+        let result = top_k(vec![5, 4, 3, 2, 1], 3);
+        assert_eq!(result, vec![1, 2, 3]);
     }
 }

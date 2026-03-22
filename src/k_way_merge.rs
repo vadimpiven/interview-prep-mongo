@@ -146,4 +146,46 @@ mod tests {
         let result: Vec<i32> = MergeIterator::new(vec![a, b]).collect();
         assert_eq!(result, vec![1, 1, 2, 2, 3, 3]);
     }
+
+    #[test]
+    fn single_element_total() {
+        let a = vec![42].into_iter();
+        let result: Vec<i32> = MergeIterator::new(vec![a]).collect();
+        assert_eq!(result, vec![42]);
+    }
+
+    #[test]
+    fn all_streams_empty() {
+        let a: Vec<i32> = vec![];
+        let b: Vec<i32> = vec![];
+        let result: Vec<i32> = MergeIterator::new(vec![a.into_iter(), b.into_iter()]).collect();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn unbalanced_stream_lengths() {
+        let a = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10].into_iter();
+        let b = vec![5].into_iter();
+        let c = vec![3, 11].into_iter();
+        let result: Vec<i32> = MergeIterator::new(vec![a, b, c]).collect();
+        assert_eq!(result, vec![1, 2, 3, 3, 4, 5, 5, 6, 7, 8, 9, 10, 11]);
+    }
+
+    #[test]
+    fn many_streams() {
+        // 10 streams, each with one element
+        let iters: Vec<_> = (0..10).map(|i| vec![i].into_iter()).collect();
+        let result: Vec<i32> = MergeIterator::new(iters).collect();
+        assert_eq!(result, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    }
+
+    #[test]
+    fn take_partial() {
+        // Verify lazy iteration — only pull 3 of 9 elements
+        let a = vec![1, 4, 7].into_iter();
+        let b = vec![2, 5, 8].into_iter();
+        let c = vec![3, 6, 9].into_iter();
+        let result: Vec<i32> = MergeIterator::new(vec![a, b, c]).take(3).collect();
+        assert_eq!(result, vec![1, 2, 3]);
+    }
 }

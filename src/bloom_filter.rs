@@ -62,13 +62,11 @@ impl BloomFilter {
     pub fn maybe_contains(&self, hash: u64) -> bool {
         let block_idx = (hash >> 32) as usize & (self.num_blocks - 1);
         let h = hash as u32;
-        for i in 0..8 {
-            let bit = h.wrapping_mul(SALT[i]) >> 27;
-            if self.blocks[block_idx].words[i] & (1 << bit) == 0 {
-                return false; // definitely not present
-            }
-        }
-        true // possibly present
+        let block = &self.blocks[block_idx];
+        SALT.iter().enumerate().all(|(i, &salt)| {
+            let bit = h.wrapping_mul(salt) >> 27;
+            block.words[i] & (1 << bit) != 0
+        })
     }
 }
 
@@ -132,5 +130,43 @@ mod tests {
         bf.insert(hash_value(&"world"));
         assert!(bf.maybe_contains(hash_value(&"hello")));
         assert!(bf.maybe_contains(hash_value(&"world")));
+    }
+
+    #[test]
+    fn insert_same_element_twice_is_idempotent() {
+        let mut bf = BloomFilter::new(10, 0.01);
+        bf.insert(hash_value(&42));
+        bf.insert(hash_value(&42));
+        assert!(bf.maybe_contains(hash_value(&42)));
+    }
+
+    #[test]
+    fn minimal_filter_one_element() {
+        let mut bf = BloomFilter::new(1, 0.5);
+        bf.insert(hash_value(&1));
+        assert!(bf.maybe_contains(hash_value(&1)));
+    }
+
+    #[test]
+    fn many_elements_no_false_negatives() {
+        let mut bf = BloomFilter::new(10000, 0.001);
+        for i in 0..10000 {
+            bf.insert(hash_value(&i));
+        }
+        for i in 0..10000 {
+            assert!(
+                bf.maybe_contains(hash_value(&i)),
+                "False negative for {}",
+                i
+            );
+        }
+    }
+
+    #[test]
+    fn empty_filter_rejects_many() {
+        let bf = BloomFilter::new(100, 0.01);
+        for i in 0..100 {
+            assert!(!bf.maybe_contains(hash_value(&i)));
+        }
     }
 }

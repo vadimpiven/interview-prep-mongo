@@ -31,17 +31,15 @@ struct Slot<K, V> {
     deleted: bool,
 }
 
-impl<K: Hash + Eq + Clone, V> HashMap<K, V> {
+impl<K: Hash + Eq, V> HashMap<K, V> {
     pub fn new() -> Self {
         Self::with_capacity(16)
     }
 
     pub fn with_capacity(capacity: usize) -> Self {
         let capacity = capacity.next_power_of_two();
-        let mut slots = Vec::with_capacity(capacity);
-        slots.resize_with(capacity, || None);
         Self {
-            slots,
+            slots: (0..capacity).map(|_| None).collect(),
             size: 0,
             capacity,
         }
@@ -52,7 +50,7 @@ impl<K: Hash + Eq + Clone, V> HashMap<K, V> {
         if self.size * 4 >= self.capacity * 3 {
             self.rehash(self.capacity * 2);
         }
-        let idx = self.probe(&key);
+        let idx = self.probe_insert(&key);
         match &mut self.slots[idx] {
             Some(slot) if !slot.deleted && slot.key == key => {
                 slot.value = value; // overwrite existing
@@ -70,7 +68,7 @@ impl<K: Hash + Eq + Clone, V> HashMap<K, V> {
 
     /// Returns reference to value, or None if not found.
     pub fn get(&self, key: &K) -> Option<&V> {
-        let idx = self.probe(key);
+        let idx = self.probe_lookup(key);
         match &self.slots[idx] {
             Some(slot) if !slot.deleted && slot.key == *key => Some(&slot.value),
             _ => None,
@@ -79,7 +77,7 @@ impl<K: Hash + Eq + Clone, V> HashMap<K, V> {
 
     /// Tombstone deletion. Returns true if key existed.
     pub fn remove(&mut self, key: &K) -> bool {
-        let idx = self.probe(key);
+        let idx = self.probe_lookup(key);
         match &mut self.slots[idx] {
             Some(slot) if !slot.deleted && slot.key == *key => {
                 slot.deleted = true;
@@ -98,14 +96,26 @@ impl<K: Hash + Eq + Clone, V> HashMap<K, V> {
         self.size == 0
     }
 
-    /// Linear probe: walk forward until we find the key, an empty slot,
-    /// or a tombstone (reusable slot).
-    fn probe(&self, key: &K) -> usize {
+    /// Probe for lookup: skip tombstones, stop at empty slot or key match.
+    /// Must not stop at tombstones — the target key may be further along
+    /// the probe chain (inserted before the tombstoned slot was deleted).
+    fn probe_lookup(&self, key: &K) -> usize {
         let mut idx = self.hash_key(key) & (self.capacity - 1);
         loop {
             match &self.slots[idx] {
                 None => return idx,
-                Some(slot) if slot.deleted => return idx,
+                Some(slot) if !slot.deleted && slot.key == *key => return idx,
+                _ => idx = (idx + 1) & (self.capacity - 1),
+            }
+        }
+    }
+
+    /// Probe for insert: stop at empty slot, tombstone (reusable), or key match.
+    fn probe_insert(&self, key: &K) -> usize {
+        let mut idx = self.hash_key(key) & (self.capacity - 1);
+        loop {
+            match &self.slots[idx] {
+                None | Some(Slot { deleted: true, .. }) => return idx,
                 Some(slot) if slot.key == *key => return idx,
                 _ => idx = (idx + 1) & (self.capacity - 1),
             }
@@ -120,11 +130,8 @@ impl<K: Hash + Eq + Clone, V> HashMap<K, V> {
 
     /// Allocate new backing array, re-insert all live slots.
     fn rehash(&mut self, new_capacity: usize) {
-        let old_slots = std::mem::replace(&mut self.slots, {
-            let mut v = Vec::with_capacity(new_capacity);
-            v.resize_with(new_capacity, || None);
-            v
-        });
+        let old_slots =
+            std::mem::replace(&mut self.slots, (0..new_capacity).map(|_| None).collect());
         self.capacity = new_capacity;
         self.size = 0;
         for slot in old_slots.into_iter().flatten() {
@@ -135,7 +142,7 @@ impl<K: Hash + Eq + Clone, V> HashMap<K, V> {
     }
 }
 
-impl<K: Hash + Eq + Clone, V> Default for HashMap<K, V> {
+impl<K: Hash + Eq, V> Default for HashMap<K, V> {
     fn default() -> Self {
         Self::new()
     }
@@ -194,6 +201,27 @@ mod tests {
     }
 
     #[test]
+    fn get_survives_tombstone_in_probe_chain() {
+        // Keys that collide: with capacity=4 (mask=3), if two keys hash to
+        // the same slot, removing the first must not hide the second.
+        let mut map = HashMap::with_capacity(16);
+        // Insert several keys, remove one, verify the rest are still found
+        for i in 0..10 {
+            map.insert(i, i * 10);
+        }
+        map.remove(&3);
+        map.remove(&5);
+        map.remove(&7);
+        for i in 0..10 {
+            if i == 3 || i == 5 || i == 7 {
+                assert_eq!(map.get(&i), None);
+            } else {
+                assert_eq!(map.get(&i), Some(&(i * 10)), "Missing key {}", i);
+            }
+        }
+    }
+
+    #[test]
     fn empty_map() {
         let map: HashMap<i32, i32> = HashMap::new();
         assert_eq!(map.get(&1), None);
@@ -207,5 +235,83 @@ mod tests {
         map.insert("world".to_string(), 2);
         assert_eq!(map.get(&"hello".to_string()), Some(&1));
         assert_eq!(map.get(&"missing".to_string()), None);
+    }
+
+    #[test]
+    fn single_entry() {
+        let mut map = HashMap::new();
+        map.insert(42, 100);
+        assert_eq!(map.len(), 1);
+        assert_eq!(map.get(&42), Some(&100));
+        assert!(map.remove(&42));
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn default_creates_empty() {
+        let map: HashMap<i32, i32> = HashMap::default();
+        assert!(map.is_empty());
+        assert_eq!(map.len(), 0);
+    }
+
+    #[test]
+    fn insert_into_tombstoned_slot() {
+        let mut map = HashMap::new();
+        map.insert(1, 10);
+        map.remove(&1);
+        // Same key reuses tombstone slot
+        map.insert(1, 20);
+        assert_eq!(map.get(&1), Some(&20));
+        assert_eq!(map.len(), 1);
+    }
+
+    #[test]
+    fn remove_all_then_reinsert() {
+        let mut map = HashMap::with_capacity(4);
+        for i in 0..10 {
+            map.insert(i, i);
+        }
+        for i in 0..10 {
+            assert!(map.remove(&i));
+        }
+        assert!(map.is_empty());
+        // Reinsert — all slots are tombstones, must still work
+        for i in 0..10 {
+            map.insert(i, i * 100);
+        }
+        for i in 0..10 {
+            assert_eq!(map.get(&i), Some(&(i * 100)));
+        }
+    }
+
+    #[test]
+    fn with_capacity_rounds_to_power_of_two() {
+        // Capacity 5 should round up to 8; inserting 5 elements should work
+        let mut map = HashMap::with_capacity(5);
+        for i in 0..5 {
+            map.insert(i, i);
+        }
+        assert_eq!(map.len(), 5);
+        for i in 0..5 {
+            assert_eq!(map.get(&i), Some(&i));
+        }
+    }
+
+    #[test]
+    fn overwrite_does_not_change_len() {
+        let mut map = HashMap::new();
+        map.insert(1, 10);
+        map.insert(2, 20);
+        map.insert(1, 30); // overwrite
+        map.insert(2, 40); // overwrite
+        assert_eq!(map.len(), 2);
+    }
+
+    #[test]
+    fn remove_returns_false_after_double_remove() {
+        let mut map = HashMap::new();
+        map.insert(1, 10);
+        assert!(map.remove(&1));
+        assert!(!map.remove(&1)); // already removed
     }
 }

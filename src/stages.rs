@@ -559,18 +559,232 @@ mod tests {
         assert_eq!(collect_all(&mut join), vec![]);
     }
 
-    // -- Composed pipeline test --
+    // -- VecScan tests --
+
+    #[test]
+    fn vec_scan_empty() {
+        let mut scan = VecScan::new(vec![]);
+        scan.open(false);
+        assert_eq!(collect_all(&mut scan), vec![]);
+    }
+
+    #[test]
+    fn vec_scan_single() {
+        let mut scan = VecScan::new(vec![42]);
+        scan.open(false);
+        assert_eq!(collect_all(&mut scan), vec![42]);
+    }
+
+    #[test]
+    fn vec_scan_reopen() {
+        let mut scan = VecScan::new(vec![1, 2, 3]);
+        scan.open(false);
+        assert_eq!(collect_all(&mut scan), vec![1, 2, 3]);
+        scan.open(true);
+        assert_eq!(collect_all(&mut scan), vec![1, 2, 3]);
+    }
+
+    // -- Additional Filter tests --
+
+    #[test]
+    fn filter_single_match() {
+        let scan = Box::new(VecScan::new(vec![5]));
+        let mut filter = FilterStage::new(scan, |v| v == 5);
+        filter.open(false);
+        assert_eq!(collect_all(&mut filter), vec![5]);
+    }
+
+    #[test]
+    fn filter_single_no_match() {
+        let scan = Box::new(VecScan::new(vec![5]));
+        let mut filter = FilterStage::new(scan, |v| v > 10);
+        filter.open(false);
+        assert_eq!(collect_all(&mut filter), vec![]);
+    }
+
+    #[test]
+    fn filter_reopen() {
+        let scan = Box::new(VecScan::new(vec![1, 2, 3, 4]));
+        let mut filter = FilterStage::new(scan, |v| v % 2 == 0);
+        filter.open(false);
+        assert_eq!(collect_all(&mut filter), vec![2, 4]);
+        filter.open(true);
+        assert_eq!(collect_all(&mut filter), vec![2, 4]);
+    }
+
+    // -- Additional LimitSkip tests --
+
+    #[test]
+    fn limit_skip_empty_input() {
+        let scan = Box::new(VecScan::new(vec![]));
+        let mut ls = LimitSkipStage::new(scan, 0, 10);
+        ls.open(false);
+        assert_eq!(collect_all(&mut ls), vec![]);
+    }
+
+    #[test]
+    fn limit_skip_single_element_no_skip() {
+        let scan = Box::new(VecScan::new(vec![42]));
+        let mut ls = LimitSkipStage::new(scan, 0, 1);
+        ls.open(false);
+        assert_eq!(collect_all(&mut ls), vec![42]);
+    }
+
+    #[test]
+    fn limit_skip_single_element_skipped() {
+        let scan = Box::new(VecScan::new(vec![42]));
+        let mut ls = LimitSkipStage::new(scan, 1, 10);
+        ls.open(false);
+        assert_eq!(collect_all(&mut ls), vec![]);
+    }
+
+    #[test]
+    fn limit_zero_returns_nothing() {
+        let scan = Box::new(VecScan::new(vec![1, 2, 3]));
+        let mut ls = LimitSkipStage::new(scan, 0, 0);
+        ls.open(false);
+        assert_eq!(collect_all(&mut ls), vec![]);
+    }
+
+    #[test]
+    fn skip_zero_limit_all() {
+        let scan = Box::new(VecScan::new(vec![1, 2, 3]));
+        let mut ls = LimitSkipStage::new(scan, 0, 3);
+        ls.open(false);
+        assert_eq!(collect_all(&mut ls), vec![1, 2, 3]);
+    }
+
+    // -- Additional HashAgg tests --
+
+    #[test]
+    fn hash_agg_single_row() {
+        let scan = Box::new(VecScan::new(vec![15]));
+        let mut agg = HashAggStage::new(scan, |r| r / 10, |r| r % 10);
+        agg.open(false);
+        assert_eq!(collect_all(&mut agg), vec![5]);
+    }
+
+    #[test]
+    fn hash_agg_many_groups_one_row_each() {
+        // 5 distinct groups, each with one row
+        let scan = Box::new(VecScan::new(vec![11, 21, 31, 41, 51]));
+        let mut agg = HashAggStage::new(scan, |r| r / 10, |r| r % 10);
+        agg.open(false);
+        let results = collect_all(&mut agg);
+        assert_eq!(results, vec![1, 1, 1, 1, 1]);
+    }
+
+    #[test]
+    fn hash_agg_reopen() {
+        let scan = Box::new(VecScan::new(vec![11, 12]));
+        let mut agg = HashAggStage::new(scan, |r| r / 10, |r| r % 10);
+        agg.open(false);
+        assert_eq!(collect_all(&mut agg), vec![3]); // 1+2
+        agg.open(true);
+        assert_eq!(collect_all(&mut agg), vec![3]); // same result
+    }
+
+    // -- Additional HashJoin tests --
+
+    #[test]
+    fn hash_join_both_empty() {
+        let outer = Box::new(VecScan::new(vec![]));
+        let inner = Box::new(VecScan::new(vec![]));
+        let mut join = HashJoinStage::new(
+            outer,
+            inner,
+            |r| r / 1000,
+            |r| r / 1000,
+            |r| r % 1000,
+            |r| r % 1000,
+        );
+        join.open(false);
+        assert_eq!(collect_all(&mut join), vec![]);
+    }
+
+    #[test]
+    fn hash_join_single_match() {
+        let outer = Box::new(VecScan::new(vec![1010]));
+        let inner = Box::new(VecScan::new(vec![1005]));
+        let mut join = HashJoinStage::new(
+            outer,
+            inner,
+            |r| r / 1000,
+            |r| r / 1000,
+            |r| r % 1000,
+            |r| r % 1000,
+        );
+        join.open(false);
+        assert_eq!(collect_all(&mut join), vec![10005]); // 10*1000+5
+    }
+
+    #[test]
+    fn hash_join_cartesian_many_to_many() {
+        // Outer: two rows with key=1; Inner: two rows with key=1
+        // Should produce 2×2 = 4 output rows
+        let outer = Box::new(VecScan::new(vec![1010, 1020]));
+        let inner = Box::new(VecScan::new(vec![1001, 1002]));
+        let mut join = HashJoinStage::new(
+            outer,
+            inner,
+            |r| r / 1000,
+            |r| r / 1000,
+            |r| r % 1000,
+            |r| r % 1000,
+        );
+        join.open(false);
+        let mut results = collect_all(&mut join);
+        results.sort();
+        // 10*1000+1, 10*1000+2, 20*1000+1, 20*1000+2
+        assert_eq!(results, vec![10001, 10002, 20001, 20002]);
+    }
+
+    #[test]
+    fn hash_join_reopen() {
+        let outer = Box::new(VecScan::new(vec![1010]));
+        let inner = Box::new(VecScan::new(vec![1005]));
+        let mut join = HashJoinStage::new(
+            outer,
+            inner,
+            |r| r / 1000,
+            |r| r / 1000,
+            |r| r % 1000,
+            |r| r % 1000,
+        );
+        join.open(false);
+        assert_eq!(collect_all(&mut join), vec![10005]);
+        join.open(true);
+        assert_eq!(collect_all(&mut join), vec![10005]);
+    }
+
+    // -- Composed pipeline tests --
 
     #[test]
     fn filter_then_limit() {
-        // Pipeline: Scan [1..10] → Filter(>5) → LimitSkip(skip=1, limit=2)
-        // Filter produces: 6, 7, 8, 9, 10
-        // Skip 1: 7, 8, 9, 10
-        // Limit 2: 7, 8
         let scan = Box::new(VecScan::new((1..=10).collect()));
         let filter = Box::new(FilterStage::new(scan, |v| v > 5));
         let mut ls = LimitSkipStage::new(filter, 1, 2);
         ls.open(false);
         assert_eq!(collect_all(&mut ls), vec![7, 8]);
+    }
+
+    #[test]
+    fn empty_pipeline() {
+        let scan = Box::new(VecScan::new(vec![]));
+        let filter = Box::new(FilterStage::new(scan, |_| true));
+        let mut ls = LimitSkipStage::new(filter, 0, 10);
+        ls.open(false);
+        assert_eq!(collect_all(&mut ls), vec![]);
+    }
+
+    #[test]
+    fn filter_then_agg() {
+        // Scan [11,12,21,22,31] → Filter(key < 3) → Agg(group by key, sum val)
+        // After filter: 11,12,21,22 → groups: key=1→3, key=2→3
+        let scan = Box::new(VecScan::new(vec![11, 12, 21, 22, 31]));
+        let filter = Box::new(FilterStage::new(scan, |r| r / 10 < 3));
+        let mut agg = HashAggStage::new(filter, |r| r / 10, |r| r % 10);
+        agg.open(false);
+        assert_eq!(collect_all(&mut agg), vec![3, 3]);
     }
 }

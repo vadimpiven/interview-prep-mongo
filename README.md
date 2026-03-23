@@ -2,7 +2,7 @@
 
 ## Interview
 
-|                 |                                                   |
+| Field           | Details                                           |
 | --------------- | ------------------------------------------------- |
 | **Type**        | Technical Screen — coding + discussion            |
 | **Duration**    | 45 min coding, 15 min questions                   |

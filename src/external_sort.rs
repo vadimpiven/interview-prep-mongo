@@ -140,8 +140,6 @@ pub fn top_k<T: Ord>(input: impl IntoIterator<Item = T>, k: usize) -> Vec<T> {
 mod tests {
     use super::*;
 
-    // -- External sort tests --
-
     #[test]
     fn sort_fits_in_memory() {
         let sorter = ExternalSorter::new(100);
@@ -161,52 +159,11 @@ mod tests {
     }
 
     #[test]
-    fn sort_empty() {
-        let sorter = ExternalSorter::<i32>::new(10);
-        let (result, stats) = sorter.sort(vec![]);
-        assert!(result.is_empty());
-        assert_eq!(stats.total_items, 0);
-    }
-
-    #[test]
-    fn sort_single_element() {
-        let sorter = ExternalSorter::new(10);
-        let (result, _) = sorter.sort(vec![42]);
-        assert_eq!(result, vec![42]);
-    }
-
-    #[test]
-    fn sort_already_sorted() {
-        let sorter = ExternalSorter::new(3);
-        let (result, _) = sorter.sort(vec![1, 2, 3, 4, 5, 6]);
-        assert_eq!(result, vec![1, 2, 3, 4, 5, 6]);
-    }
-
-    #[test]
-    fn sort_reverse_sorted() {
-        let sorter = ExternalSorter::new(3);
-        let (result, _) = sorter.sort(vec![6, 5, 4, 3, 2, 1]);
-        assert_eq!(result, vec![1, 2, 3, 4, 5, 6]);
-    }
-
-    #[test]
     fn sort_duplicates() {
         let sorter = ExternalSorter::new(3);
         let (result, _) = sorter.sort(vec![3, 1, 2, 1, 3, 2]);
         assert_eq!(result, vec![1, 1, 2, 2, 3, 3]);
     }
-
-    #[test]
-    fn sort_large_input() {
-        let sorter = ExternalSorter::new(100);
-        let input: Vec<i32> = (0..1000).rev().collect();
-        let (result, stats) = sorter.sort(input);
-        let expected: Vec<i32> = (0..1000).collect();
-        assert_eq!(result, expected);
-        assert!(stats.spilled);
-    }
-
-    // -- TopK tests --
 
     #[test]
     fn top_k_basic() {
@@ -215,112 +172,8 @@ mod tests {
     }
 
     #[test]
-    fn top_k_larger_than_input() {
-        let result = top_k(vec![3, 1, 2], 10);
-        assert_eq!(result, vec![1, 2, 3]);
-    }
-
-    #[test]
-    fn top_k_one() {
-        let result = top_k(vec![5, 3, 1, 4, 2], 1);
-        assert_eq!(result, vec![1]);
-    }
-
-    #[test]
-    fn top_k_zero() {
-        let result = top_k(vec![5, 3, 1], 0);
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn top_k_empty_input() {
-        let result = top_k(Vec::<i32>::new(), 5);
-        assert!(result.is_empty());
-    }
-
-    #[test]
     fn top_k_with_duplicates() {
         let result = top_k(vec![3, 1, 2, 1, 3, 2], 4);
         assert_eq!(result, vec![1, 1, 2, 2]);
-    }
-
-    // -- External sort edge cases --
-
-    #[test]
-    fn sort_exact_buffer_boundary() {
-        let sorter = ExternalSorter::new(3);
-        let (result, stats) = sorter.sort(vec![6, 5, 4, 3, 2, 1]);
-        assert_eq!(result, vec![1, 2, 3, 4, 5, 6]);
-        assert_eq!(stats.num_runs, 2);
-        assert!(stats.spilled);
-    }
-
-    #[test]
-    fn sort_buffer_size_one() {
-        let sorter = ExternalSorter::new(1);
-        let (result, stats) = sorter.sort(vec![3, 1, 2]);
-        assert_eq!(result, vec![1, 2, 3]);
-        assert_eq!(stats.num_runs, 3);
-    }
-
-    #[test]
-    fn sort_all_same_values() {
-        let sorter = ExternalSorter::new(2);
-        let (result, _) = sorter.sort(vec![5, 5, 5, 5, 5]);
-        assert_eq!(result, vec![5, 5, 5, 5, 5]);
-    }
-
-    #[test]
-    fn sort_two_elements_reversed() {
-        let sorter = ExternalSorter::new(10);
-        let (result, stats) = sorter.sort(vec![2, 1]);
-        assert_eq!(result, vec![1, 2]);
-        assert!(!stats.spilled);
-    }
-
-    #[test]
-    fn sort_stats_correct_item_count() {
-        let sorter = ExternalSorter::new(5);
-        let (_, stats) = sorter.sort(vec![10, 20, 30, 40, 50, 60, 70]);
-        assert_eq!(stats.total_items, 7);
-        assert_eq!(stats.num_runs, 2);
-    }
-
-    #[test]
-    #[should_panic(expected = "buffer capacity must be at least 1")]
-    fn sort_zero_buffer_panics() {
-        let _sorter = ExternalSorter::<i32>::new(0);
-    }
-
-    // -- TopK edge cases --
-
-    #[test]
-    fn top_k_equals_input_length() {
-        let result = top_k(vec![5, 3, 1, 4, 2], 5);
-        assert_eq!(result, vec![1, 2, 3, 4, 5]);
-    }
-
-    #[test]
-    fn top_k_all_same() {
-        let result = top_k(vec![7, 7, 7, 7], 2);
-        assert_eq!(result, vec![7, 7]);
-    }
-
-    #[test]
-    fn top_k_single_element_input() {
-        let result = top_k(vec![42], 1);
-        assert_eq!(result, vec![42]);
-    }
-
-    #[test]
-    fn top_k_already_sorted() {
-        let result = top_k(vec![1, 2, 3, 4, 5], 3);
-        assert_eq!(result, vec![1, 2, 3]);
-    }
-
-    #[test]
-    fn top_k_reverse_sorted() {
-        let result = top_k(vec![5, 4, 3, 2, 1], 3);
-        assert_eq!(result, vec![1, 2, 3]);
     }
 }

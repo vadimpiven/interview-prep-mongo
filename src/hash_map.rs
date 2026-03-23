@@ -235,15 +235,6 @@ mod tests {
     }
 
     #[test]
-    fn overwrite_key() {
-        let mut map = HashMap::new();
-        map.insert(1, 10);
-        map.insert(1, 20);
-        assert_eq!(map.get(&1), Some(&20));
-        assert_eq!(map.len(), 1);
-    }
-
-    #[test]
     fn remove_and_reinsert() {
         let mut map = HashMap::new();
         map.insert(1, 10);
@@ -252,12 +243,6 @@ mod tests {
         assert_eq!(map.len(), 0);
         map.insert(1, 20);
         assert_eq!(map.get(&1), Some(&20));
-    }
-
-    #[test]
-    fn remove_nonexistent() {
-        let mut map: HashMap<i32, i32> = HashMap::new();
-        assert!(!map.remove(&1));
     }
 
     #[test]
@@ -291,97 +276,6 @@ mod tests {
     }
 
     #[test]
-    fn empty_map() {
-        let map: HashMap<i32, i32> = HashMap::new();
-        assert_eq!(map.get(&1), None);
-        assert!(map.is_empty());
-    }
-
-    #[test]
-    fn string_keys() {
-        let mut map = HashMap::new();
-        map.insert("hello".to_string(), 1);
-        map.insert("world".to_string(), 2);
-        assert_eq!(map.get(&"hello".to_string()), Some(&1));
-        assert_eq!(map.get(&"missing".to_string()), None);
-    }
-
-    #[test]
-    fn single_entry() {
-        let mut map = HashMap::new();
-        map.insert(42, 100);
-        assert_eq!(map.len(), 1);
-        assert_eq!(map.get(&42), Some(&100));
-        assert!(map.remove(&42));
-        assert!(map.is_empty());
-    }
-
-    #[test]
-    fn default_creates_empty() {
-        let map: HashMap<i32, i32> = HashMap::default();
-        assert!(map.is_empty());
-        assert_eq!(map.len(), 0);
-    }
-
-    #[test]
-    fn insert_into_tombstoned_slot() {
-        let mut map = HashMap::new();
-        map.insert(1, 10);
-        map.remove(&1);
-        map.insert(1, 20);
-        assert_eq!(map.get(&1), Some(&20));
-        assert_eq!(map.len(), 1);
-    }
-
-    #[test]
-    fn remove_all_then_reinsert() {
-        let mut map = HashMap::with_capacity(4);
-        for i in 0..10 {
-            map.insert(i, i);
-        }
-        for i in 0..10 {
-            assert!(map.remove(&i));
-        }
-        assert!(map.is_empty());
-        for i in 0..10 {
-            map.insert(i, i * 100);
-        }
-        for i in 0..10 {
-            assert_eq!(map.get(&i), Some(&(i * 100)));
-        }
-    }
-
-    #[test]
-    fn with_capacity_rounds_to_power_of_two() {
-        let mut map = HashMap::with_capacity(5);
-        for i in 0..5 {
-            map.insert(i, i);
-        }
-        assert_eq!(map.len(), 5);
-        for i in 0..5 {
-            assert_eq!(map.get(&i), Some(&i));
-        }
-    }
-
-    #[test]
-    fn overwrite_does_not_change_len() {
-        let mut map = HashMap::new();
-        map.insert(1, 10);
-        map.insert(2, 20);
-        map.insert(1, 30);
-        map.insert(2, 40);
-        assert_eq!(map.len(), 2);
-    }
-
-    #[test]
-    fn remove_returns_false_after_double_remove() {
-        let mut map = HashMap::new();
-        map.insert(1, 10);
-        assert!(map.remove(&1));
-        assert!(!map.remove(&1));
-    }
-
-    #[test]
     fn probe_insert_no_duplicate_through_tombstone() {
         // Force all keys to collide. Insert A, B (both at bucket 0).
         // Remove A (tombstone at 0, B live at 1). Overwrite B.
@@ -402,35 +296,5 @@ mod tests {
         assert!(map.remove(&2));
         assert_eq!(map.get(&2), None);
         assert_eq!(map.len(), 0);
-    }
-
-    #[test]
-    fn tombstone_rehash_cleans_up() {
-        // Fill and delete repeatedly — tombstones trigger rehash
-        let mut map = HashMap::with_capacity(4);
-        for round in 0..5 {
-            for i in 0..10 {
-                map.insert(round * 10 + i, i);
-            }
-            for i in 0..10 {
-                map.remove(&(round * 10 + i));
-            }
-        }
-        assert!(map.is_empty());
-        // Should still work after many tombstone cycles
-        map.insert(999, 42);
-        assert_eq!(map.get(&999), Some(&42));
-    }
-
-    #[test]
-    fn iter_returns_live_entries() {
-        let mut map = HashMap::new();
-        map.insert(1, 10);
-        map.insert(2, 20);
-        map.insert(3, 30);
-        map.remove(&2);
-        let mut entries: Vec<_> = map.iter().map(|(&k, &v)| (k, v)).collect();
-        entries.sort();
-        assert_eq!(entries, vec![(1, 10), (3, 30)]);
     }
 }

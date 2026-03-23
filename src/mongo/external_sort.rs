@@ -20,7 +20,7 @@
 // actually reduce peak memory — all runs remain in memory as Vec<Vec<T>>.
 // In real MongoDB, runs are serialized to temp files with snappy compression.
 
-use crate::k_way_merge::MergeIterator;
+use super::k_way_merge::MergeIterator;
 use std::collections::BinaryHeap;
 use std::marker::PhantomData;
 

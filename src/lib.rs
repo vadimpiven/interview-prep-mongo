@@ -1,29 +1,32 @@
 // MongoDB QE Technical Screen — Practice Implementations
 //
 // Each module is a self-contained answer to a likely interview problem.
-// Run all tests: cargo test
-// Run one module: cargo test hash_map
+// Run all tests:       cargo test
+// Run one group:       cargo test hash_maps
+// Run one module:      cargo test hash_map
+// Run one test:        cargo test hash_map::tests::insert_and_get
 //
-// Modules ordered from most to least likely to encounter.
+// +-------------------------------------------------------------+
+// |  hash_maps/         -- hash table, bloom filter, LRU cache   |
+// |  sort/              -- merge sort, quicksort, k-way merge,   |
+// |                       external sort with spilling             |
+// |  trees/             -- binary tree + BST, trie, n-ary        |
+// |                       expression tree (MongoDB `MatchExpression`) |
+// |  mongo/             -- SBE pull-based stages (filter, join, agg) |
+// +-------------------------------------------------------------+
 
-// -- General CS fundamentals (expected in any coding interview) --
+/// Hash-based data structures: hash map from arrays, bloom filter, LRU cache.
+/// HR: "Arguably the single most important data structure known to mankind."
+pub mod hash_maps;
 
-/// Open-addressing hash map built on a Vec (no std::collections).
-/// HR explicitly asks: "implement a hash table using only arrays."
-/// MongoDB uses absl::flat_hash_map (same concept: flat, cache-friendly, open addressing).
-pub mod hash_map;
+/// Sorting and merging: merge sort, quicksort, k-way merge, external sort + top-K.
+/// HR: "Know the details of at least one `n*log(n)` algorithm, preferably two."
+pub mod sort;
 
-/// Merge sort and quicksort — from-scratch implementations.
-/// "Know the details of at least one n*log(n) sorting algorithm, preferably two."
-pub mod sorting;
-
-/// BST with traversals + AVL tree (self-balancing BST with rotations).
-/// "Know about trees; basic tree construction, traversal and manipulation algorithms.
-/// Be familiar with at least one type of balanced binary tree."
+/// Trees: binary tree traversal + BST, trie, n-ary expression tree with optimize/evaluate.
+/// HR: "Know about trees; basic tree construction, traversal and manipulation."
 pub mod trees;
 
-// -- MongoDB-specific data structures and algorithms --
-
-/// LRU cache, SBE stages, k-way merge, external sort, bloom filter.
-/// Implementations modeled after MongoDB's query execution engine internals.
+/// MongoDB-specific: pull-based SBE stages (filter, limit/skip, hash agg, hash join).
+/// HR: "Implement system routines, distill large data sets, transform one data set to another."
 pub mod mongo;

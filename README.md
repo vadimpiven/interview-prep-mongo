@@ -1,5 +1,17 @@
 # MongoDB Query Execution — Interview Preparation
 
+## Position
+
+[Senior Software Engineer, Query Execution](https://www.mongodb.com/careers/jobs/7484657) — Dublin / Remote Ireland
+
+| Field              | Details                                              |
+| ------------------ | ---------------------------------------------------- |
+| **Team**           | Query Execution, Product & Technology                |
+| **Level**          | Senior (IC), 5+ years systems programming            |
+| **Languages**      | C++ (codebase), C, Rust, or similar compiled         |
+| **Focus areas**    | Query performance, language enhancements, diagnostics |
+| **Preferred**      | Database / query engine experience; MS/PhD in DB     |
+
 ## Interview
 
 | Field           | Details                                           |

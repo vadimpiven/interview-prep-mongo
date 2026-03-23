@@ -4,13 +4,13 @@
 
 [Senior Software Engineer, Query Execution](https://www.mongodb.com/careers/jobs/7484657) — Dublin / Remote Ireland
 
-| Field              | Details                                              |
-| ------------------ | ---------------------------------------------------- |
-| **Team**           | Query Execution, Product & Technology                |
-| **Level**          | Senior (IC), 5+ years systems programming            |
-| **Languages**      | C++ (codebase), C, Rust, or similar compiled         |
-| **Focus areas**    | Query performance, language enhancements, diagnostics |
-| **Preferred**      | Database / query engine experience; MS/PhD in DB     |
+| Field           | Details                                               |
+| --------------- | ----------------------------------------------------- |
+| **Team**        | Query Execution, Product & Technology                 |
+| **Level**       | Senior (IC), 5+ years systems programming             |
+| **Languages**   | C++ (codebase), C, Rust, or similar compiled          |
+| **Focus areas** | Query performance, language enhancements, diagnostics |
+| **Preferred**   | Database / query engine experience; MS/PhD in DB      |
 
 ## Interview
 
@@ -32,12 +32,14 @@
 5. Run tests + fix failures                      5 min
 ```
 
-## Interviewers
+## Contacts
 
-| Role             | Name                                                              | Team                       | Location |
-| ---------------- | ----------------------------------------------------------------- | -------------------------- | -------- |
-| **Leads coding** | [Catalin Sumanaru](https://www.linkedin.com/in/catalin-sumanaru/) | Query Execution (SE3)      | Dublin   |
-| **Assists**      | [Lyublena Antova](https://www.linkedin.com/in/antova/)            | Query Optimization (Staff) | Bulgaria |
+| Role                         | Name                                                                     | Team / Function            | Location |
+| ---------------------------- | ------------------------------------------------------------------------ | -------------------------- | -------- |
+| Technical Recruiter          | [Charles Brennan](https://www.linkedin.com/in/charles-brennan-1a743348/) | Recruiting                 | Dublin   |
+| Candidate Experience Coord.  | [Jessie Hogan](https://www.linkedin.com/in/jessie-hogan-a98baa109/)      | Recruiting                 | Dublin   |
+| **Leads coding interview**   | [Catalin Sumanaru](https://www.linkedin.com/in/catalin-sumanaru/)        | Query Execution (SE3)      | Dublin   |
+| **Assists coding interview** | [Lyublena Antova](https://www.linkedin.com/in/antova/)                   | Query Optimization (Staff) | Bulgaria |
 
 ## Team
 

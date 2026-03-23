@@ -11,8 +11,8 @@
 //   head/tail sentinels — avoid edge cases in link/unlink operations
 //
 // MongoDB plan cache lifecycle:
-//   INACTIVE → ACTIVE (validated by replanning)
-//   ACTIVE → REPLAN if cached plan 10× worse than expected
+//   INACTIVE -> ACTIVE (validated by replanning)
+//   ACTIVE -> REPLAN if cached plan 10x worse than expected
 //   INVALIDATE on DDL (index create/drop)
 //
 // Eviction: LRU (least recently used) evicted when size exceeds budget.
@@ -25,7 +25,7 @@ use std::hash::Hash;
 const NONE: usize = usize::MAX;
 
 pub struct LRUCache<K, V> {
-    map: HashMap<K, usize>, // key → node index in arena
+    map: HashMap<K, usize>, // key -> node index in arena
     nodes: Vec<Node<K, V>>, // arena for linked list nodes
     head: usize,            // index of MRU node (front of list)
     tail: usize,            // index of LRU node (back of list)
@@ -42,6 +42,11 @@ struct Node<K, V> {
 
 impl<K: Eq + Hash + Clone, V> LRUCache<K, V> {
     /// O(1).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `capacity` is 0.
+    #[must_use]
     pub fn new(capacity: usize) -> Self {
         assert!(capacity > 0, "LRU cache capacity must be at least 1");
         Self {
@@ -55,7 +60,7 @@ impl<K: Eq + Hash + Clone, V> LRUCache<K, V> {
     }
 
     /// Get value by key. Promotes entry to MRU position (head of list).
-    /// O(1) — HashMap lookup + linked list unlink/relink.
+    /// O(1) -- `HashMap` lookup + linked list unlink/relink.
     pub fn get(&mut self, key: &K) -> Option<&V> {
         let &idx = self.map.get(key)?;
         self.move_to_head(idx);
@@ -63,7 +68,7 @@ impl<K: Eq + Hash + Clone, V> LRUCache<K, V> {
     }
 
     /// Insert or overwrite. Evicts LRU (tail) if over capacity.
-    /// O(1) — HashMap insert + linked list operations.
+    /// O(1) -- `HashMap` insert + linked list operations.
     pub fn insert(&mut self, key: K, value: V) {
         if let Some(&idx) = self.map.get(&key) {
             // Overwrite existing: update value, promote to MRU
@@ -106,7 +111,7 @@ impl<K: Eq + Hash + Clone, V> LRUCache<K, V> {
         self.map.insert(key, idx);
     }
 
-    /// O(1) — HashMap lookup.
+    /// O(1) -- `HashMap` lookup.
     #[must_use]
     pub fn contains(&self, key: &K) -> bool {
         self.map.contains_key(key)
@@ -131,14 +136,14 @@ impl<K: Eq + Hash + Clone, V> LRUCache<K, V> {
         let prev = self.nodes[idx].prev;
         let next = self.nodes[idx].next;
 
-        if prev != NONE {
-            self.nodes[prev].next = next;
+        if let Some(prev_idx) = (prev != NONE).then_some(prev) {
+            self.nodes[prev_idx].next = next;
         } else {
             self.head = next; // was the head
         }
 
-        if next != NONE {
-            self.nodes[next].prev = prev;
+        if let Some(next_idx) = (next != NONE).then_some(next) {
+            self.nodes[next_idx].prev = prev;
         } else {
             self.tail = prev; // was the tail
         }
@@ -176,6 +181,15 @@ impl<K: Eq + Hash + Clone, V> LRUCache<K, V> {
 mod tests {
     use super::*;
 
+    // ZERO
+    #[test]
+    fn empty_cache() {
+        let mut cache: LRUCache<i32, i32> = LRUCache::new(3);
+        assert_eq!(cache.get(&1), None);
+        assert!(cache.is_empty());
+    }
+
+    // MANY
     #[test]
     fn evicts_lru() {
         let mut cache = LRUCache::new(3);
@@ -216,7 +230,7 @@ mod tests {
         cache.insert(1, 10);
         cache.insert(2, 20);
         cache.insert(3, 30);
-        cache.insert(1, 99); // overwrite 1 → now MRU
+        cache.insert(1, 99); // overwrite 1 -> now MRU
         cache.insert(4, 40); // evicts 2 (LRU), not 1
         assert!(cache.contains(&1));
         assert!(!cache.contains(&2));

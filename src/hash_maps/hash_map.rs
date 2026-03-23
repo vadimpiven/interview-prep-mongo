@@ -17,7 +17,7 @@
 //   - Swiss table (what absl actually uses): SIMD metadata, group probing
 
 use std::collections::hash_map::RandomState;
-use std::hash::{BuildHasher, Hash, Hasher};
+use std::hash::{BuildHasher, Hash};
 
 pub struct HashMap<K, V, S = RandomState> {
     slots: Vec<Option<Slot<K, V>>>,
@@ -35,11 +35,13 @@ struct Slot<K, V> {
 
 impl<K: Hash + Eq, V> HashMap<K, V> {
     /// O(c) where c = initial capacity (default 16).
+    #[must_use]
     pub fn new() -> Self {
         Self::with_capacity(16)
     }
 
     /// O(c) where c = capacity rounded up to next power of two.
+    #[must_use]
     pub fn with_capacity(capacity: usize) -> Self {
         Self::with_capacity_and_hasher(capacity, RandomState::new())
     }
@@ -47,6 +49,7 @@ impl<K: Hash + Eq, V> HashMap<K, V> {
 
 impl<K: Hash + Eq, V, S: BuildHasher> HashMap<K, V, S> {
     /// O(c) where c = capacity rounded up to next power of two.
+    #[must_use]
     pub fn with_capacity_and_hasher(capacity: usize, hash_builder: S) -> Self {
         let capacity = capacity.max(1).next_power_of_two();
         Self {
@@ -87,7 +90,7 @@ impl<K: Hash + Eq, V, S: BuildHasher> HashMap<K, V, S> {
         }
     }
 
-    /// Returns reference to value, or None if not found.
+    /// Returns reference to value, or `None` if not found.
     /// O(1) amortized, O(n) worst case (due to probing).
     #[must_use]
     pub fn get(&self, key: &K) -> Option<&V> {
@@ -176,9 +179,10 @@ impl<K: Hash + Eq, V, S: BuildHasher> HashMap<K, V, S> {
     }
 
     fn compute_hash(&self, key: &K) -> usize {
-        let mut hasher = self.hash_builder.build_hasher();
-        key.hash(&mut hasher);
-        hasher.finish() as usize
+        // Intentional truncation on 32-bit targets: hash values are used modulo capacity.
+        #[allow(clippy::cast_possible_truncation)]
+        let hash = self.hash_builder.hash_one(key) as usize;
+        hash
     }
 
     /// Allocate new backing array, re-insert all live slots.
@@ -205,6 +209,7 @@ impl<K: Hash + Eq, V, S: BuildHasher + Default> Default for HashMap<K, V, S> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::hash::Hasher;
 
     /// Deterministic hasher that maps all keys to the same bucket,
     /// forcing maximum collisions for testing probe chain behavior.
@@ -224,6 +229,16 @@ mod tests {
         fn write(&mut self, _bytes: &[u8]) {}
     }
 
+    // ZERO
+    #[test]
+    fn empty_map() {
+        let map: HashMap<i32, i32> = HashMap::new();
+        assert_eq!(map.get(&1), None);
+        assert!(map.is_empty());
+        assert_eq!(map.len(), 0);
+    }
+
+    // MANY
     #[test]
     fn insert_and_get() {
         let mut map = HashMap::new();

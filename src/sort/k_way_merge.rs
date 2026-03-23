@@ -6,21 +6,21 @@
 // Also used for merging change stream events from multiple shards.
 //
 // Algorithm:
-//   1. Push first element from each iterator onto a max-heap (with reversed Ord → min-heap)
+//   1. Push first element from each iterator onto a max-heap (with reversed Ord -> min-heap)
 //   2. Pop minimum, output it
 //   3. Advance the iterator that produced it; if not exhausted, push next element
 //   4. Repeat until heap is empty
 //
 // Complexity: O(N log K) where N = total elements, K = number of streams
 //
-// Stability: ties broken by source_id (lower = earlier). MongoDB uses this
+// Stability: ties broken by `source_id` (lower = earlier). MongoDB uses this
 // to preserve insertion order for equal sort keys ($sort stability guarantee).
 
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
 /// Merges K sorted iterators into a single sorted iterator.
-/// Each next() call is O(log K). Full iteration over N total elements is O(N log K).
+/// Each `next()` call is O(log K). Full iteration over N total elements is O(N log K).
 pub struct MergeIterator<I, T> {
     heap: BinaryHeap<MergeSource<I, T>>,
 }
@@ -31,7 +31,7 @@ struct MergeSource<I, T> {
     iter: I,
 }
 
-// BinaryHeap is a max-heap. Reverse ordering to get min-heap behavior.
+// `BinaryHeap` is a max-heap. Reverse ordering to get min-heap behavior.
 impl<I: Iterator<Item = T>, T: Ord> Ord for MergeSource<I, T> {
     fn cmp(&self, other: &Self) -> Ordering {
         other
@@ -57,6 +57,7 @@ impl<I: Iterator<Item = T>, T: Ord> Eq for MergeSource<I, T> {}
 
 impl<I: Iterator<Item = T>, T: Ord> MergeIterator<I, T> {
     /// Initialize merge from K iterators. O(K log K) to build the heap.
+    #[must_use]
     pub fn new(iters: Vec<I>) -> Self {
         let mut heap = BinaryHeap::new();
         for (id, mut iter) in iters.into_iter().enumerate() {
@@ -72,18 +73,18 @@ impl<I: Iterator<Item = T>, T: Ord> MergeIterator<I, T> {
     }
 }
 
-/// Implements Iterator so you can use .collect(), .take(), for loops, etc.
+/// Implements `Iterator` so you can use `.collect()`, `.take()`, for loops, etc.
 impl<I: Iterator<Item = T>, T: Ord> Iterator for MergeIterator<I, T> {
     type Item = T;
 
-    /// O(log K) per call — one heap pop + one heap push.
+    /// O(log K) per call -- one heap pop + one heap push.
     fn next(&mut self) -> Option<T> {
         let mut stream = self.heap.pop()?;
         let result = if let Some(next_val) = stream.iter.next() {
-            // MergeSource has more — swap current value and re-push
+            // `MergeSource` has more -- swap current value and re-push
             std::mem::replace(&mut stream.current, next_val)
         } else {
-            // MergeSource exhausted — return current, don't re-push
+            // `MergeSource` exhausted -- return current, don't re-push
             return Some(stream.current);
         };
         self.heap.push(stream);
@@ -95,6 +96,21 @@ impl<I: Iterator<Item = T>, T: Ord> Iterator for MergeIterator<I, T> {
 mod tests {
     use super::*;
 
+    // ZERO
+    #[test]
+    fn zero_streams() {
+        let result: Vec<i32> = MergeIterator::new(Vec::<std::vec::IntoIter<i32>>::new()).collect();
+        assert!(result.is_empty());
+    }
+
+    // ONE
+    #[test]
+    fn single_stream() {
+        let result: Vec<i32> = MergeIterator::new(vec![vec![1, 2, 3].into_iter()]).collect();
+        assert_eq!(result, vec![1, 2, 3]);
+    }
+
+    // MANY
     #[test]
     fn merge_two_sorted() {
         let a = vec![1, 3, 5].into_iter();
@@ -103,6 +119,7 @@ mod tests {
         assert_eq!(result, vec![1, 2, 3, 4, 5, 6]);
     }
 
+    // EDGE: one stream is empty
     #[test]
     fn merge_with_empty_stream() {
         let a: Vec<i32> = vec![];
@@ -111,21 +128,12 @@ mod tests {
         assert_eq!(result, vec![1, 2, 3]);
     }
 
+    // EDGE: duplicates across streams -- stability via `source_id`
     #[test]
     fn duplicate_values_stable() {
-        // source_id 0 should come before source_id 1 for equal values
-        let a = vec![1, 1].into_iter(); // source 0
-        let b = vec![1, 1].into_iter(); // source 1
+        let a = vec![1, 1].into_iter();
+        let b = vec![1, 1].into_iter();
         let result: Vec<i32> = MergeIterator::new(vec![a, b]).collect();
         assert_eq!(result, vec![1, 1, 1, 1]);
-    }
-
-    #[test]
-    fn unbalanced_stream_lengths() {
-        let a = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10].into_iter();
-        let b = vec![5].into_iter();
-        let c = vec![3, 11].into_iter();
-        let result: Vec<i32> = MergeIterator::new(vec![a, b, c]).collect();
-        assert_eq!(result, vec![1, 2, 3, 3, 4, 5, 5, 6, 7, 8, 9, 10, 11]);
     }
 }

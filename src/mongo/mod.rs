@@ -1,27 +1,22 @@
-// MongoDB-specific data structures and algorithms.
+// MongoDB-specific patterns: pull-based SBE execution stages.
 //
-// These modules implement patterns found in MongoDB's query execution engine
-// (SBE), plan cache, sorter, and hash join stages.
+// Each stage is a separate file, scoped for one 45-min interview:
+//   20 min implementation + 10 min tests + 15 min discussion.
+//
+// Shared infrastructure (Stage trait, VecScan, collect_all) is in stages.rs.
+// In a real interview you implement ONE of these, not all.
 
-/// LRU cache: HashMap + index-based doubly-linked list for O(1) get/insert.
-/// MongoDB's plan cache (lru_key_value.h) uses this exact pattern.
-pub mod lru_cache;
-
-/// Pull-based iterator stages: the core SBE execution model.
-/// Stage trait with open/get_next/close lifecycle.
-/// Includes: FilterStage, LimitSkipStage, HashAggStage, HashJoinStage.
+/// Stage trait, `PlanState` enum, `VecScan` mock, `collect_all` helper.
 pub mod stages;
 
-/// K-way merge of sorted iterators using a BinaryHeap.
-/// Used in MongoDB's external sort merge phase (src/mongo/db/sorter/).
-/// Also relevant to change stream event merging across shards.
-pub mod k_way_merge;
+/// `FilterStage` -- streaming predicate filter. Simplest stage to implement.
+pub mod filter_stage;
 
-/// External sort with memory-bounded spilling.
-/// MongoDB's Sorter (src/mongo/db/sorter/) does exactly this:
-/// sort chunks in memory → spill sorted runs → k-way merge.
-pub mod external_sort;
+/// `LimitSkipStage` -- skip N then return M. Tests `reOpen` semantics.
+pub mod limit_skip_stage;
 
-/// Bloom filter with cache-line-aligned blocks and 8 hash functions.
-/// Used in MongoDB's HybridHashJoinStage to skip non-matching probe rows.
-pub mod bloom_filter;
+/// `HashAggStage` -- blocking GROUP BY with SUM. Tests hash table + accumulator.
+pub mod hash_agg_stage;
+
+/// `HashJoinStage` -- build/probe equi-join. Tests hash table + multi-match buffering.
+pub mod hash_join_stage;

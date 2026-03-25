@@ -78,28 +78,19 @@ impl<K: Hash + Eq, V, S: BuildHasher> HashMap<K, V, S> {
             self.rehash(new_cap);
         }
         let idx = self.probe_insert(&key);
-        match &mut self.slots[idx] {
-            Some(slot) if !slot.deleted && slot.key == key => {
-                slot.value = value; // overwrite existing
-            }
-            Some(slot) if slot.deleted => {
-                *slot = Slot {
-                    key,
-                    value,
-                    deleted: false,
-                };
-                self.len += 1;
+        if let Some(slot) = &self.slots[idx] {
+            if slot.deleted {
                 self.tombstone_count -= 1;
-            }
-            _ => {
-                self.slots[idx] = Some(Slot {
-                    key,
-                    value,
-                    deleted: false,
-                });
                 self.len += 1;
             }
+        } else {
+            self.len += 1;
         }
+        self.slots[idx] = Some(Slot {
+            key,
+            value,
+            deleted: false,
+        })
     }
 
     /// Returns reference to value, or `None` if not found.

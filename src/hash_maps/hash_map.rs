@@ -90,7 +90,7 @@ impl<K: Hash + Eq, V, S: BuildHasher> HashMap<K, V, S> {
             key,
             value,
             deleted: false,
-        })
+        });
     }
 
     /// Returns reference to value, or `None` if not found.
@@ -155,13 +155,14 @@ impl<K: Hash + Eq, V, S: BuildHasher> HashMap<K, V, S> {
     /// the probe chain (inserted before the tombstoned slot was deleted).
     fn probe_lookup(&self, key: &K) -> usize {
         let mask = self.capacity() - 1;
-        let mut idx = self.compute_hash(key) & mask;
+        let mut idx = self.bucket_for(key);
         loop {
             match &self.slots[idx] {
                 None => return idx,
                 Some(slot) if !slot.deleted && slot.key == *key => return idx,
-                _ => idx = (idx + 1) & mask,
+                _ => {}
             }
+            idx = (idx + 1) & mask;
         }
     }
 
@@ -170,28 +171,26 @@ impl<K: Hash + Eq, V, S: BuildHasher> HashMap<K, V, S> {
     /// a tombstone precedes the live entry in the probe chain.
     fn probe_insert(&self, key: &K) -> usize {
         let mask = self.capacity() - 1;
-        let mut idx = self.compute_hash(key) & mask;
+        let mut idx = self.bucket_for(key);
         let mut first_tombstone: Option<usize> = None;
         loop {
             match &self.slots[idx] {
                 None => return first_tombstone.unwrap_or(idx),
-                Some(slot) if slot.deleted => {
-                    if first_tombstone.is_none() {
-                        first_tombstone = Some(idx);
-                    }
-                    idx = (idx + 1) & mask;
-                }
                 Some(slot) if slot.key == *key => return idx,
-                _ => idx = (idx + 1) & mask,
+                Some(slot) if slot.deleted && first_tombstone.is_none() => {
+                    first_tombstone = Some(idx);
+                }
+                _ => {}
             }
+            idx = (idx + 1) & mask;
         }
     }
 
-    fn compute_hash(&self, key: &K) -> usize {
+    fn bucket_for(&self, key: &K) -> usize {
         // Intentional truncation on 32-bit targets: hash values are used modulo capacity.
         #[allow(clippy::cast_possible_truncation)]
         let hash = self.hash_builder.hash_one(key) as usize;
-        hash
+        hash & (self.capacity() - 1)
     }
 
     /// Allocate new backing array, re-insert all live slots.

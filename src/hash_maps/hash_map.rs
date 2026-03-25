@@ -34,10 +34,10 @@ struct Slot<K, V> {
 }
 
 impl<K: Hash + Eq, V> HashMap<K, V> {
-    /// O(c) where c = initial capacity (default 16).
+    /// Zero-cost construction — no allocation until first insert.
     #[must_use]
     pub fn new() -> Self {
-        Self::with_capacity(16)
+        Self::with_capacity(0)
     }
 
     /// O(c) where c = capacity rounded up to next power of two.
@@ -48,10 +48,14 @@ impl<K: Hash + Eq, V> HashMap<K, V> {
 }
 
 impl<K: Hash + Eq, V, S: BuildHasher> HashMap<K, V, S> {
-    /// O(c) where c = capacity rounded up to next power of two.
+    /// O(c) where c = capacity rounded up to next power of two (0 = no allocation).
     #[must_use]
     pub fn with_capacity_and_hasher(capacity: usize, hash_builder: S) -> Self {
-        let capacity = capacity.max(1).next_power_of_two();
+        let capacity = if capacity == 0 {
+            0
+        } else {
+            capacity.next_power_of_two()
+        };
         Self {
             slots: (0..capacity).map(|_| None).collect(),
             len: 0,
@@ -63,8 +67,8 @@ impl<K: Hash + Eq, V, S: BuildHasher> HashMap<K, V, S> {
     /// Insert or overwrite. Rehashes if load factor exceeds 75%.
     /// O(1) amortized, O(n) worst case (due to probing or rehash).
     pub fn insert(&mut self, key: K, value: V) {
-        if (self.len + self.tombstone_count) * 4 >= self.capacity() * 3 {
-            self.rehash(self.capacity() * 2);
+        if self.capacity() == 0 || (self.len + self.tombstone_count) * 4 >= self.capacity() * 3 {
+            self.rehash((self.capacity() * 2).max(16));
         }
         let idx = self.probe_insert(&key);
         match &mut self.slots[idx] {
@@ -94,6 +98,9 @@ impl<K: Hash + Eq, V, S: BuildHasher> HashMap<K, V, S> {
     /// O(1) amortized, O(n) worst case (due to probing).
     #[must_use]
     pub fn get(&self, key: &K) -> Option<&V> {
+        if self.slots.is_empty() {
+            return None;
+        }
         let idx = self.probe_lookup(key);
         match &self.slots[idx] {
             Some(slot) if !slot.deleted && slot.key == *key => Some(&slot.value),
@@ -104,6 +111,9 @@ impl<K: Hash + Eq, V, S: BuildHasher> HashMap<K, V, S> {
     /// Tombstone deletion. Returns true if key existed.
     /// O(1) amortized, O(n) worst case (due to probing).
     pub fn remove(&mut self, key: &K) -> bool {
+        if self.slots.is_empty() {
+            return false;
+        }
         let idx = self.probe_lookup(key);
         match &mut self.slots[idx] {
             Some(slot) if !slot.deleted && slot.key == *key => {

@@ -83,10 +83,11 @@ impl<K: Hash + Eq, V, S: BuildHasher> HashMap<K, V, S> {
                 slot.value = value; // overwrite existing
             }
             Some(slot) if slot.deleted => {
-                // Reuse tombstone slot
-                slot.key = key;
-                slot.value = value;
-                slot.deleted = false;
+                *slot = Slot {
+                    key,
+                    value,
+                    deleted: false,
+                };
                 self.len += 1;
                 self.tombstone_count -= 1;
             }

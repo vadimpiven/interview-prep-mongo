@@ -68,7 +68,13 @@ impl<K: Hash + Eq, V, S: BuildHasher> HashMap<K, V, S> {
     /// O(1) amortized, O(n) worst case (due to probing or rehash).
     pub fn insert(&mut self, key: K, value: V) {
         if self.capacity() == 0 || (self.len + self.tombstone_count) * 4 >= self.capacity() * 3 {
-            self.rehash((self.capacity() * 2).max(16));
+            // Grow only if live entries are dense; otherwise compact at same capacity.
+            let new_cap = if self.len * 4 >= self.capacity() * 3 {
+                (self.capacity() * 2).max(16)
+            } else {
+                self.capacity().max(16)
+            };
+            self.rehash(new_cap);
         }
         let idx = self.probe_insert(&key);
         match &mut self.slots[idx] {

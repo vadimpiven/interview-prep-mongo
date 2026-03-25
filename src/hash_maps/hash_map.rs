@@ -70,10 +70,11 @@ impl<K: Hash + Eq, V, S: BuildHasher> HashMap<K, V, S> {
         if self.capacity() == 0 || (self.len + self.tombstone_count) * 4 >= self.capacity() * 3 {
             // Grow only if live entries are dense; otherwise compact at same capacity.
             let new_cap = if self.len * 4 >= self.capacity() * 3 {
-                (self.capacity() * 2).max(16)
+                self.capacity() * 2
             } else {
-                self.capacity().max(16)
-            };
+                self.capacity()
+            }
+            .max(16);
             self.rehash(new_cap);
         }
         let idx = self.probe_insert(&key);

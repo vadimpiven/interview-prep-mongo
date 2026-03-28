@@ -24,38 +24,34 @@
 //   3. Place pivot at boundary
 //   4. Recurse on left and right partitions
 
-// --- Helper (defined before caller, C-style) ---
-
-/// Lomuto partition: pick last element as pivot.
-/// Walks array once, swapping elements smaller than pivot to the front.
-/// Returns final pivot position.
-///
-/// Invariant: `arr[0..i]` < pivot, `arr[i..j]` >= pivot, `arr[pivot_idx]` = pivot
-fn partition<T: Ord>(arr: &mut [T]) -> usize {
-    let len = arr.len();
-    let pivot_idx = len - 1;
-    let mut i = 0;
-
-    for j in 0..pivot_idx {
-        if arr[j] < arr[pivot_idx] {
-            arr.swap(i, j);
-            i += 1;
-        }
-    }
-    arr.swap(i, pivot_idx);
-    i
-}
-
-// --- Public API ---
-
 /// Quicksort -- in-place, unstable, O(n log n) average.
+///
+/// Iterative (explicit stack) to avoid call-stack overflow on large or
+/// degenerate inputs. Uses Lomuto partition: pick last element as pivot,
+/// walk the sub-array once swapping elements smaller than pivot to the front.
 pub fn quicksort<T: Ord>(arr: &mut [T]) {
-    if arr.len() <= 1 {
-        return;
+    let mut stack: Vec<(usize, usize)> = vec![(0, arr.len())];
+
+    while let Some((lo, hi)) = stack.pop() {
+        if hi - lo <= 1 {
+            continue;
+        }
+
+        // Lomuto partition on arr[lo..hi].
+        // Invariant: arr[lo..i] < pivot, arr[i..j] >= pivot, arr[pivot] = pivot
+        let pivot = hi - 1;
+        let mut i = lo;
+        for j in lo..pivot {
+            if arr[j] < arr[pivot] {
+                arr.swap(i, j);
+                i += 1;
+            }
+        }
+        arr.swap(i, pivot);
+
+        stack.push((lo, i));
+        stack.push((i + 1, hi));
     }
-    let pivot_idx = partition(arr);
-    quicksort(&mut arr[..pivot_idx]);
-    quicksort(&mut arr[pivot_idx + 1..]);
 }
 
 #[cfg(test)]

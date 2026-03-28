@@ -18,11 +18,23 @@
 // This implementation uses Lomuto partition (simpler to write in interview).
 // Hoare partition is faster in practice but harder to get right.
 //
+// Median-of-three pivot selection: compare first, middle, and last elements,
+// swap the median value into the pivot position (last). This avoids O(n^2)
+// on already-sorted or reverse-sorted input — the most common degenerate case.
+//
+// Introsort (what C++ std::sort / MongoDB uses):
+//   Starts as quicksort, but tracks recursion depth. If depth exceeds
+//   2*floor(log2(n)), it switches to heapsort for that partition — this
+//   guarantees O(n log n) worst case while keeping quicksort's fast average.
+//   For partitions smaller than ~16 elements it switches to insertion sort,
+//   which is faster at small sizes due to low overhead and cache locality.
+//   Result: O(n log n) worst case, quicksort-fast average, in-place, unstable.
+//
 // Algorithm:
-//   1. Pick pivot (last element in Lomuto scheme)
+//   1. Pick pivot (median-of-three, then placed last for Lomuto)
 //   2. Partition: elements < pivot go left, >= pivot go right
 //   3. Place pivot at boundary
-//   4. Recurse on left and right partitions
+//   4. Push left and right partitions onto explicit stack
 
 /// Quicksort -- in-place, unstable, O(n log n) average.
 ///
@@ -30,6 +42,11 @@
 /// degenerate inputs. Uses Lomuto partition: pick last element as pivot,
 /// walk the sub-array once swapping elements smaller than pivot to the front.
 pub fn quicksort<T: Ord>(arr: &mut [T]) {
+    quicksort_by(arr, T::cmp);
+}
+
+/// Quicksort with custom comparator.
+pub fn quicksort_by<T, F: Fn(&T, &T) -> std::cmp::Ordering>(arr: &mut [T], cmp: F) {
     let mut stack: Vec<(usize, usize)> = vec![(0, arr.len())];
 
     while let Some((lo, hi)) = stack.pop() {
@@ -37,12 +54,26 @@ pub fn quicksort<T: Ord>(arr: &mut [T]) {
             continue;
         }
 
+        // Median-of-three: sort first/middle/last, swap median into last position.
+        let mid = lo + (hi - lo) / 2;
+        let last = hi - 1;
+        if cmp(&arr[mid], &arr[lo]).is_lt() {
+            arr.swap(lo, mid);
+        }
+        if cmp(&arr[last], &arr[lo]).is_lt() {
+            arr.swap(lo, last);
+        }
+        if cmp(&arr[mid], &arr[last]).is_lt() {
+            arr.swap(mid, last);
+        }
+        // Now arr[last] is the median of the three — used as pivot.
+
         // Lomuto partition on arr[lo..hi].
         // Invariant: arr[lo..i] < pivot, arr[i..j] >= pivot, arr[pivot] = pivot
-        let pivot = hi - 1;
+        let pivot = last;
         let mut i = lo;
         for j in lo..pivot {
-            if arr[j] < arr[pivot] {
+            if cmp(&arr[j], &arr[pivot]).is_lt() {
                 arr.swap(i, j);
                 i += 1;
             }

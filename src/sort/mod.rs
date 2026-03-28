@@ -9,6 +9,14 @@ pub mod merge_sort;
 /// `MongoDB`: uses `std::sort` (introsort) for in-memory chunks -- same family.
 pub mod quicksort;
 
+/// Heapsort -- unstable, O(n log n) worst case, in-place. Max-heap + extract.
+/// Introsort falls back to this when quicksort recurses too deep.
+pub mod heapsort;
+
+/// Insertion sort -- stable, O(n^2), but fastest for small arrays (< ~16 elements).
+/// Introsort switches to this for small partitions due to low overhead.
+pub mod insertion_sort;
+
 /// K-way merge of sorted iterators using `BinaryHeap`.
 /// HR: "handling obscenely large amounts of data."
 /// `MongoDB`: `MergeIterator` in `sorter_template_defs.h`, change stream shard merging.

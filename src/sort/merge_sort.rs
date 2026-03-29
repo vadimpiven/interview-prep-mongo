@@ -42,7 +42,8 @@ pub fn merge_sort_by<T: Clone, F: Fn(&T, &T) -> Ordering>(arr: &mut [T], cmp: F)
         return;
     }
 
-    let mut buf = arr.to_vec();
+    let mut src = arr.to_vec();
+    let mut dst = arr.to_vec();
     let mut width = 1;
 
     while width < len {
@@ -50,33 +51,36 @@ pub fn merge_sort_by<T: Clone, F: Fn(&T, &T) -> Ordering>(arr: &mut [T], cmp: F)
             let mid = (lo + width).min(len);
             let hi = (lo + 2 * width).min(len);
 
-            // Merge arr[lo..mid] and arr[mid..hi] into buf[lo..hi].
+            // Merge src[lo..mid] and src[mid..hi] into dst[lo..hi].
             let (mut i, mut j, mut k) = (lo, mid, lo);
             while i < mid && j < hi {
                 // <= for stability: prefer left element on ties
-                if cmp(&arr[i], &arr[j]).is_le() {
-                    buf[k] = arr[i].clone();
+                if cmp(&src[i], &src[j]).is_le() {
+                    dst[k] = src[i].clone();
                     i += 1;
                 } else {
-                    buf[k] = arr[j].clone();
+                    dst[k] = src[j].clone();
                     j += 1;
                 }
                 k += 1;
             }
             while i < mid {
-                buf[k] = arr[i].clone();
+                dst[k] = src[i].clone();
                 i += 1;
                 k += 1;
             }
             while j < hi {
-                buf[k] = arr[j].clone();
+                dst[k] = src[j].clone();
                 j += 1;
                 k += 1;
             }
         }
-        arr.clone_from_slice(&buf);
+        std::mem::swap(&mut src, &mut dst);
         width *= 2;
     }
+
+    // After all passes, `src` holds the sorted result.
+    arr.clone_from_slice(&src);
 }
 
 #[cfg(test)]

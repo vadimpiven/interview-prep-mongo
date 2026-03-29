@@ -17,12 +17,16 @@
 // to preserve insertion order for equal sort keys ($sort stability guarantee).
 
 use std::cmp::Ordering;
-use std::collections::BinaryHeap;
+
+use super::heap::Heap;
 
 /// Merges K sorted iterators into a single sorted iterator.
 /// Each `next()` call is O(log K). Full iteration over N total elements is O(N log K).
+///
+/// Uses the shared `Heap` struct as a min-heap (reversed comparator) — same
+/// struct that heapsort uses as a max-heap.
 pub struct MergeIterator<I, T> {
-    heap: BinaryHeap<MergeSource<I, T>>,
+    heap: Heap<MergeSource<I, T>, fn(&MergeSource<I, T>, &MergeSource<I, T>) -> Ordering>,
 }
 
 struct MergeSource<I, T> {
@@ -31,45 +35,35 @@ struct MergeSource<I, T> {
     iter: I,
 }
 
-// `BinaryHeap` is a max-heap. Reverse ordering to get min-heap behavior.
-impl<I: Iterator<Item = T>, T: Ord> Ord for MergeSource<I, T> {
-    fn cmp(&self, other: &Self) -> Ordering {
-        other
-            .current
-            .cmp(&self.current) // reversed: smaller = higher priority
-            .then(other.source_id.cmp(&self.source_id)) // stable: lower id wins ties
-    }
+/// Min-heap comparator for MergeSource: smallest `current` wins,
+/// ties broken by lower `source_id` (stability).
+///
+/// Reversed because `Heap` is a max-heap — the element that compares
+/// Greater rises to the top. By reversing, the smallest value wins.
+fn merge_source_cmp<I, T: Ord>(a: &MergeSource<I, T>, b: &MergeSource<I, T>) -> Ordering {
+    b.current
+        .cmp(&a.current)
+        .then(b.source_id.cmp(&a.source_id))
 }
-
-impl<I: Iterator<Item = T>, T: Ord> PartialOrd for MergeSource<I, T> {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl<I: Iterator<Item = T>, T: Ord> PartialEq for MergeSource<I, T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.current == other.current && self.source_id == other.source_id
-    }
-}
-
-impl<I: Iterator<Item = T>, T: Ord> Eq for MergeSource<I, T> {}
 
 impl<I: Iterator<Item = T>, T: Ord> MergeIterator<I, T> {
-    /// Initialize merge from K iterators. O(K log K) to build the heap.
+    /// Initialize merge from K iterators. O(K) to build the heap.
     #[must_use]
     pub fn new(iters: Vec<I>) -> Self {
-        let mut heap = BinaryHeap::new();
-        for (id, mut iter) in iters.into_iter().enumerate() {
-            if let Some(val) = iter.next() {
-                heap.push(MergeSource {
+        let sources: Vec<_> = iters
+            .into_iter()
+            .enumerate()
+            .filter_map(|(id, mut iter)| {
+                iter.next().map(|val| MergeSource {
                     current: val,
                     source_id: id,
                     iter,
-                });
-            }
+                })
+            })
+            .collect();
+        Self {
+            heap: Heap::from_vec(sources, merge_source_cmp),
         }
-        Self { heap }
     }
 }
 
@@ -79,15 +73,13 @@ impl<I: Iterator<Item = T>, T: Ord> Iterator for MergeIterator<I, T> {
 
     /// O(log K) per call -- one heap pop + one heap push.
     fn next(&mut self) -> Option<T> {
-        let mut stream = self.heap.pop()?;
-        let result = if let Some(next_val) = stream.iter.next() {
-            // `MergeSource` has more -- swap current value and re-push
-            std::mem::replace(&mut stream.current, next_val)
+        let mut source = self.heap.pop()?;
+        let result = if let Some(next_val) = source.iter.next() {
+            std::mem::replace(&mut source.current, next_val)
         } else {
-            // `MergeSource` exhausted -- return current, don't re-push
-            return Some(stream.current);
+            return Some(source.current);
         };
-        self.heap.push(stream);
+        self.heap.push(source);
         Some(result)
     }
 }

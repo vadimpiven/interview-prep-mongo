@@ -19,86 +19,64 @@
 //   - Linked lists (merge sort is O(1) extra space on linked lists)
 //   - Worst-case guarantee needed (quicksort is O(n^2) worst case)
 //
-// Algorithm:
-//   1. Split array in half
-//   2. Recursively sort each half
-//   3. Merge two sorted halves (linear scan, pick smaller element)
+// Algorithm (bottom-up, iterative):
+//   1. Start with width = 1 (each element is a sorted run)
+//   2. Merge adjacent pairs of runs of size `width` into runs of size `2*width`
+//   3. Double `width` and repeat until the whole array is one sorted run
 //   Stability: on ties, pick from left half -> preserves original order
 
-// --- Helpers (defined before callers, C-style) ---
-
-/// Merge two sorted slices into a single sorted `Vec`.
-/// This is the same operation as `MongoDB`'s `MergeIterator` for 2 runs.
-fn merge<T: Ord + Clone>(left: &[T], right: &[T]) -> Vec<T> {
-    let mut result = Vec::with_capacity(left.len() + right.len());
-    let (mut i, mut j) = (0, 0);
-
-    while i < left.len() && j < right.len() {
-        // <= for stability: prefer left element on ties
-        if left[i] <= right[j] {
-            result.push(left[i].clone());
-            i += 1;
-        } else {
-            result.push(right[j].clone());
-            j += 1;
-        }
-    }
-
-    result.extend_from_slice(&left[i..]);
-    result.extend_from_slice(&right[j..]);
-    result
-}
-
-fn merge_by<T: Clone, F: Fn(&T, &T) -> std::cmp::Ordering>(
-    left: &[T],
-    right: &[T],
-    cmp: F,
-) -> Vec<T> {
-    let mut result = Vec::with_capacity(left.len() + right.len());
-    let (mut i, mut j) = (0, 0);
-    while i < left.len() && j < right.len() {
-        if cmp(&left[i], &right[j]).is_le() {
-            result.push(left[i].clone());
-            i += 1;
-        } else {
-            result.push(right[j].clone());
-            j += 1;
-        }
-    }
-    result.extend_from_slice(&left[i..]);
-    result.extend_from_slice(&right[j..]);
-    result
-}
-
-// --- Public API ---
+use std::cmp::Ordering;
 
 /// Merge sort -- stable, O(n log n) time, O(n) space.
 pub fn merge_sort<T: Ord + Clone>(arr: &mut [T]) {
-    let len = arr.len();
-    if len <= 1 {
-        return;
-    }
-    let mid = len / 2;
-
-    merge_sort(&mut arr[..mid]);
-    merge_sort(&mut arr[mid..]);
-
-    let merged = merge(&arr[..mid], &arr[mid..]);
-    arr.clone_from_slice(&merged);
+    merge_sort_by(arr, T::cmp);
 }
 
 /// Merge sort with custom comparator. O(n log n) time, O(n) space.
-/// Needed for stability testing and for sorting by a key function.
-pub fn merge_sort_by<T: Clone, F: Fn(&T, &T) -> std::cmp::Ordering + Copy>(arr: &mut [T], cmp: F) {
+///
+/// Bottom-up (iterative): merge runs of width 1, 2, 4, 8, ...
+/// avoiding recursion and stack overflow on large inputs.
+pub fn merge_sort_by<T: Clone, F: Fn(&T, &T) -> Ordering>(arr: &mut [T], cmp: F) {
     let len = arr.len();
     if len <= 1 {
         return;
     }
-    let mid = len / 2;
-    merge_sort_by(&mut arr[..mid], cmp);
-    merge_sort_by(&mut arr[mid..], cmp);
-    let merged = merge_by(&arr[..mid], &arr[mid..], cmp);
-    arr.clone_from_slice(&merged);
+
+    let mut buf = arr.to_vec();
+    let mut width = 1;
+
+    while width < len {
+        for lo in (0..len).step_by(2 * width) {
+            let mid = (lo + width).min(len);
+            let hi = (lo + 2 * width).min(len);
+
+            // Merge arr[lo..mid] and arr[mid..hi] into buf[lo..hi].
+            let (mut i, mut j, mut k) = (lo, mid, lo);
+            while i < mid && j < hi {
+                // <= for stability: prefer left element on ties
+                if cmp(&arr[i], &arr[j]).is_le() {
+                    buf[k] = arr[i].clone();
+                    i += 1;
+                } else {
+                    buf[k] = arr[j].clone();
+                    j += 1;
+                }
+                k += 1;
+            }
+            while i < mid {
+                buf[k] = arr[i].clone();
+                i += 1;
+                k += 1;
+            }
+            while j < hi {
+                buf[k] = arr[j].clone();
+                j += 1;
+                k += 1;
+            }
+        }
+        arr.clone_from_slice(&buf);
+        width *= 2;
+    }
 }
 
 #[cfg(test)]

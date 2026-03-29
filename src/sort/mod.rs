@@ -9,6 +9,9 @@ pub mod merge_sort;
 /// `MongoDB`: uses `std::sort` (introsort) for in-memory chunks -- same family.
 pub mod quicksort;
 
+/// Binary heap — shared by heapsort (max-heap) and k-way merge (min-heap).
+pub mod heap;
+
 /// Heapsort -- unstable, O(n log n) worst case, in-place. Max-heap + extract.
 /// Introsort falls back to this when quicksort recurses too deep.
 pub mod heapsort;

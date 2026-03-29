@@ -19,73 +19,23 @@
 //   2. Repeatedly swap root (max) to the end, shrink heap, sift down
 //   After step 2, array is sorted in ascending order.
 
+use std::cmp::Ordering;
+
+use super::heap::Heap;
+
 /// Heapsort -- in-place, unstable, O(n log n) worst case.
-pub fn heapsort<T: Ord>(arr: &mut [T]) {
+pub fn heapsort<T: Ord + Clone>(arr: &mut [T]) {
     heapsort_by(arr, T::cmp);
 }
 
 /// Heapsort with custom comparator.
-pub fn heapsort_by<T, F: Fn(&T, &T) -> std::cmp::Ordering>(arr: &mut [T], cmp: F) {
-    let mut heap = MaxHeap { arr, cmp };
-    heap.build();
-    heap.sort();
-}
-
-/// Max-heap backed by a mutable slice. Tracks the live heap region
-/// (`arr[..len]`) separately from the sorted tail (`arr[len..]`).
-struct MaxHeap<'a, T, F> {
-    arr: &'a mut [T],
-    cmp: F,
-}
-
-impl<T, F: Fn(&T, &T) -> std::cmp::Ordering> MaxHeap<'_, T, F> {
-    /// Build a max-heap in place. Start from the last non-leaf and sift down.
-    /// Last non-leaf = parent of last element = (len - 2) / 2.
-    fn build(&mut self) {
-        let len = self.arr.len();
-        if len <= 1 {
-            return;
-        }
-        for i in (0..=(len - 2) / 2).rev() {
-            self.sift_down(i, len);
-        }
-    }
-
-    /// Extract max repeatedly: swap root with last unsorted element,
-    /// shrink heap by one, restore heap property.
-    fn sort(&mut self) {
-        for end in (1..self.arr.len()).rev() {
-            self.arr.swap(0, end);
-            self.sift_down(0, end);
-        }
-    }
-
-    /// Sift element at `pos` down to restore max-heap property within `arr[..heap_len]`.
-    ///
-    /// Invariant: both children of `pos` are valid max-heaps; only `pos` itself
-    /// may violate the heap property.
-    fn sift_down(&mut self, mut pos: usize, heap_len: usize) {
-        loop {
-            let left = 2 * pos + 1;
-            if left >= heap_len {
-                break;
-            }
-            // Pick the larger child.
-            let right = left + 1;
-            let child = if right < heap_len && (self.cmp)(&self.arr[right], &self.arr[left]).is_gt()
-            {
-                right
-            } else {
-                left
-            };
-            // If parent is already >= largest child, heap property holds.
-            if (self.cmp)(&self.arr[pos], &self.arr[child]).is_ge() {
-                break;
-            }
-            self.arr.swap(pos, child);
-            pos = child;
-        }
-    }
+///
+/// Builds a max-heap from the data, then extracts elements in sorted order.
+/// Uses the shared `Heap` struct (same one k-way merge uses as a min-heap).
+pub fn heapsort_by<T: Clone, F: Fn(&T, &T) -> Ordering>(arr: &mut [T], cmp: F) {
+    let heap = Heap::from_vec(arr.to_vec(), cmp);
+    let sorted = heap.into_sorted_vec();
+    arr.clone_from_slice(&sorted);
 }
 
 #[cfg(test)]

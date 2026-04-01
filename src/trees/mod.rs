@@ -1,10 +1,15 @@
 // Tree data structures and algorithms.
 // HR: "Know about trees; basic tree construction, traversal and manipulation."
 
-/// Binary tree -- construction, BFS/DFS traversal, manipulation, BST insert/search.
+/// AVL tree -- self-balancing BST, O(log n) guaranteed.
 /// HR: "Familiarize yourself with binary trees. Be familiar with at least one balanced BST."
-/// Balanced BST concepts (AVL/red-black) covered in comments for discussion.
-pub mod binary_tree;
+/// Insert, search, delete with automatic rebalancing via rotations (LL/RR/LR/RL).
+pub mod avl_tree;
+
+/// Splay tree -- self-adjusting BST, O(log n) amortized.
+/// No balance invariant — every access splays the node to root.
+/// Adapts to access patterns: frequently used nodes stay near root.
+pub mod splay_tree;
 
 /// Trie (prefix tree) -- insert, search, `starts_with`, `count_with_prefix`, delete.
 /// HR: "Familiarize yourself with trie-trees."
